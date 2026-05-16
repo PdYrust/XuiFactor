@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.1.0-beta
+        required: true
+        type: string
+      title:
+        description: Release title, for example XuiFactor v0.1.0-beta
+        required: true
+        type: string
+      prerelease:
+        description: Mark as a prerelease
+        required: true
+        default: true
+        type: boolean
+      draft:
+        description: Create as a draft release
+        required: true
+        default: false
+        type: boolean
+      notes_mode:
+        description: Release notes source
+        required: true
+        default: generated
+        type: choice
+        options:
+          - generated
+          - file
+          - manual
+          - none
+      notes_file:
+        description: Notes file path when notes_mode is file
+        required: false
+        default: docs/releases/v0.1.0-beta.md
+        type: string
+      notes_body:
+        description: Notes text when notes_mode is manual
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Validate release inputs
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_TITLE: ${{ inputs.title }}
+          NOTES_MODE: ${{ inputs.notes_mode }}
+          NOTES_FILE: ${{ inputs.notes_file }}
+          NOTES_BODY: ${{ inputs.notes_body }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must use a leading v, for example v0.1.0-beta" >&2
+            exit 1
+          fi
+
+          case "$NOTES_MODE" in
+            generated|file|manual|none) ;;
+            *)
+              echo "notes_mode must be generated, file, manual, or none" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$NOTES_MODE" == "file" && ! -f "$NOTES_FILE" ]]; then
+            echo "notes_file does not exist: $NOTES_FILE" >&2
+            exit 1
+          fi
+
+          if [[ "$NOTES_MODE" == "manual" && -z "$NOTES_BODY" ]]; then
+            echo "notes_body is required when notes_mode is manual" >&2
+            exit 1
+          fi
+
+          version="${INPUT_TAG#v}"
+          tag="v$version"
+          title="$INPUT_TITLE"
+          if [[ -z "$title" ]]; then
+            title="$tag"
+          fi
+
+          {
+            echo "RELEASE_VERSION=$version"
+            echo "RELEASE_TAG=$tag"
+            echo "RELEASE_TITLE=$title"
+          } >> "$GITHUB_ENV"
+
+      - name: Prepare release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_MODE: ${{ inputs.notes_mode }}
+          NOTES_FILE: ${{ inputs.notes_file }}
+          NOTES_BODY: ${{ inputs.notes_body }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          case "$NOTES_MODE" in
+            generated)
+              gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+                -f tag_name="$RELEASE_TAG" \
+                -f target_commitish="$GITHUB_SHA" \
+                -q .body > dist/RELEASE-NOTES.md
+              ;;
+            file)
+              cp "$NOTES_FILE" dist/RELEASE-NOTES.md
+              ;;
+            manual)
+              printf '%s\n' "$NOTES_BODY" > dist/RELEASE-NOTES.md
+              ;;
+            none)
+              : > dist/RELEASE-NOTES.md
+              ;;
+          esac
+
+      - name: Test
+        run: make test
+
+      - name: Package
+        run: make package VERSION="${RELEASE_VERSION}"
+
+      - name: Verify packages
+        run: make verify-packages VERSION="${RELEASE_VERSION}"
+
+      - name: Validate release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            test -f "dist/xui-factor_v${RELEASE_VERSION}_linux_${arch}.tar.gz"
+            test -f "dist/xui-factor_v${RELEASE_VERSION}_linux_${arch}.tar.gz.sha256"
+          done
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TITLE }}
+          body_path: dist/RELEASE-NOTES.md
+          prerelease: ${{ inputs.prerelease }}
+          draft: ${{ inputs.draft }}
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256

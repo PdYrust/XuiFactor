@@ -1,0 +1,16 @@
+build/
+dist/
+bin/
+
+coverage.out
+coverage.txt
+coverage.html
+*.cover
+*.coverage
+
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+.DS_Store

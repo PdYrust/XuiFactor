@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">XuiFactor icon</title>
+  <desc id="desc">Placeholder logo for XuiFactor</desc>
+  <rect width="256" height="256" rx="56" fill="#111827"/>
+  <path d="M66 74h32l30 38 30-38h32l-45 54 47 58h-33l-31-41-32 41H64l47-58L66 74z" fill="#F9FAFB"/>
+  <path d="M172 62h20v20h-20V62zm22 22h20v20h-20V84zm-44 0h20v20h-20V84z" fill="#38BDF8"/>
+  <path d="M177 152h18v18h-18v-18zm21 20h18v18h-18v-18zm-42 0h18v18h-18v-18z" fill="#22C55E"/>
+</svg>

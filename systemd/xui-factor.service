@@ -1,0 +1,14 @@
+[Unit]
+Description=XuiFactor 3x-ui traffic factor sidecar
+After=network.target x-ui.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/xui-factor --config /etc/xui-factor/config.json run
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

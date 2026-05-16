@@ -1,0 +1,52 @@
+package store
+
+var migrationStatements = []string{
+	`CREATE TABLE IF NOT EXISTS xui_factor_meta (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS xui_factor_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT,
+		inbound_id INTEGER,
+		email TEXT NOT NULL,
+		factor_ppm INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		activated_at INTEGER,
+		paused_at INTEGER,
+		disabled_at INTEGER
+	)`,
+	`CREATE TABLE IF NOT EXISTS xui_factor_rule_clients (
+		rule_id INTEGER NOT NULL,
+		traffic_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL,
+		email TEXT NOT NULL,
+		last_up INTEGER NOT NULL,
+		last_down INTEGER NOT NULL,
+		last_all_time INTEGER NOT NULL,
+		rem_up INTEGER NOT NULL DEFAULT 0,
+		rem_down INTEGER NOT NULL DEFAULT 0,
+		rem_all_time INTEGER NOT NULL DEFAULT 0,
+		missing_since INTEGER,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY(rule_id, traffic_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS xui_factor_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		rule_id INTEGER,
+		event_type TEXT NOT NULL,
+		message TEXT,
+		created_at INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_rules_state
+		ON xui_factor_rules(state)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_rules_target_state
+		ON xui_factor_rules(email, inbound_id, state)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_rule_clients_traffic
+		ON xui_factor_rule_clients(traffic_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_events_rule_created
+		ON xui_factor_events(rule_id, created_at)`,
+}
