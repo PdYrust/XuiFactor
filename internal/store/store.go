@@ -126,6 +126,7 @@ func (s *Store) MetadataReady(ctx context.Context) (bool, error) {
 		"xui_factor_meta",
 		"xui_factor_rules",
 		"xui_factor_rule_clients",
+		"xui_factor_scopes",
 		"xui_factor_events",
 	} {
 		exists, err := s.tableExists(ctx, table)

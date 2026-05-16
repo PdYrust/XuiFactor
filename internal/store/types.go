@@ -14,6 +14,10 @@ const (
 	EventTrafficApply  = "traffic_applied"
 	EventClientReset   = "client_rebaseline"
 	EventClientMissing = "client_missing"
+	EventClientPruned  = "client_tracking_pruned"
+	EventScopeEnroll   = "scope_auto_enroll"
+	EventScopeSkip     = "scope_auto_enroll_skipped"
+	EventCleanup       = "cleanup"
 )
 
 var (
@@ -48,6 +52,18 @@ type Rule struct {
 	PausedAt    *int64
 	DisabledAt  *int64
 	ClientCount int64
+	Scope       *Scope
+}
+
+type Scope struct {
+	RuleID                 int64
+	InboundID              *int64
+	LimitedOnly            bool
+	IncludeDisabledClients bool
+	Once                   bool
+	CreatedAt              int64
+	UpdatedAt              int64
+	Rule                   Rule
 }
 
 type RuleClient struct {
@@ -88,4 +104,22 @@ type ClientFilter struct {
 	InboundID              *int64
 	LimitedOnly            bool
 	IncludeDisabledClients bool
+}
+
+type CleanupOptions struct {
+	Now                   int64
+	MissingClientGrace    int64
+	DisabledRuleRetention int64
+	AuditRetention        int64
+	DryRun                bool
+}
+
+type CleanupResult struct {
+	MissingClientsMarked int
+	MissingClientsPruned int
+	DisabledRulesPruned  int
+	DisabledScopesPruned int
+	AuditEventsPruned    int
+	VacuumRun            bool
+	DryRun               bool
 }

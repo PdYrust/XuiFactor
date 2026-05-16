@@ -2,6 +2,22 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.2.0-beta - Unreleased
+
+### Added
+
+- Persistent `enable-all` scopes that auto-enroll future matching clients.
+- `enable-all --once` snapshot mode for current clients only.
+- `cleanup` command with dry-run, retention override, and explicit VACUUM support.
+- Automatic metadata cleanup for missing clients, disabled rules/scopes, and old audit events.
+- v0.2.0-beta release notes.
+
+### Safety
+
+- Client tracking uses traffic id, inbound id, and email identity.
+- Missing or mismatched clients are marked before pruning.
+- Cleanup prunes only XuiFactor metadata and never modifies 3x-ui counters.
+
 ## v0.1.0-beta - Unreleased
 
 ### Added

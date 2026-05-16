@@ -4,5 +4,9 @@
   "busy_timeout": "5s",
   "backup_dir": "/var/backups/xui-factor",
   "enable_backups": true,
-  "log_level": "info"
+  "log_level": "info",
+  "auto_cleanup": true,
+  "missing_client_grace": "30s",
+  "disabled_rule_retention": "7d",
+  "audit_retention": "30d"
 }

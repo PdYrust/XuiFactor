@@ -14,6 +14,7 @@ type EnableAllRequest struct {
 	InboundID              *int64
 	LimitedOnly            bool
 	IncludeDisabledClients bool
+	Once                   bool
 	Name                   string
 }
 
@@ -27,10 +28,16 @@ type BulkResult struct {
 	SkippedExisting int
 	Conflicts       int
 	Missing         int
+	Mode            string
 }
 
 func (r BulkResult) Summary() string {
-	return fmt.Sprintf("matched=%d changed=%d skipped=%d conflicts=%d missing=%d",
+	prefix := ""
+	if r.Mode != "" {
+		prefix = "mode=" + r.Mode + " "
+	}
+	return fmt.Sprintf("%smatched=%d changed=%d skipped=%d conflicts=%d missing=%d",
+		prefix,
 		r.Matched,
 		r.Changed,
 		r.SkippedExisting,
@@ -45,7 +52,10 @@ func (s *Service) EnableAll(ctx context.Context, req EnableAllRequest) (BulkResu
 		return BulkResult{}, err
 	}
 	now := s.now().Unix()
-	var result BulkResult
+	result := BulkResult{Mode: "persistent"}
+	if req.Once {
+		result.Mode = "snapshot"
+	}
 
 	err = s.store.WithImmediateTx(ctx, func(tx *store.Tx) error {
 		clients, err := tx.ListClientCandidates(ctx, store.ClientFilter{
@@ -84,21 +94,44 @@ func (s *Service) EnableAll(ctx context.Context, req EnableAllRequest) (BulkResu
 			}
 			targets = append(targets, createTarget{client: client})
 		}
+		if req.Once && len(targets) == 0 {
+			return nil
+		}
+
+		ruleID, err := tx.CreateRule(ctx, store.Rule{
+			Name:        strings.TrimSpace(req.Name),
+			InboundID:   scopedRuleInboundID(req.InboundID),
+			Email:       "",
+			FactorPPM:   factorPPM,
+			State:       store.StateActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			ActivatedAt: &now,
+		})
+		if err != nil {
+			return err
+		}
+		if err := tx.CreateScope(ctx, store.Scope{
+			RuleID:                 ruleID,
+			InboundID:              req.InboundID,
+			LimitedOnly:            req.LimitedOnly,
+			IncludeDisabledClients: req.IncludeDisabledClients,
+			Once:                   req.Once,
+			CreatedAt:              now,
+			UpdatedAt:              now,
+		}); err != nil {
+			return err
+		}
+
+		eventMessage := "persistent scope enabled by enable-all"
+		if req.Once {
+			eventMessage = "snapshot scope enabled by enable-all"
+		}
+		if err := tx.AddEvent(ctx, &ruleID, store.EventRuleEnabled, eventMessage, now); err != nil {
+			return err
+		}
 
 		for _, target := range targets {
-			ruleID, err := tx.CreateRule(ctx, store.Rule{
-				Name:        strings.TrimSpace(req.Name),
-				InboundID:   target.client.InboundID,
-				Email:       target.client.Email,
-				FactorPPM:   factorPPM,
-				State:       store.StateActive,
-				CreatedAt:   now,
-				UpdatedAt:   now,
-				ActivatedAt: &now,
-			})
-			if err != nil {
-				return err
-			}
 			if err := tx.CreateRuleClient(ctx, store.RuleClient{
 				RuleID:      ruleID,
 				TrafficID:   target.client.ID,
@@ -109,9 +142,6 @@ func (s *Service) EnableAll(ctx context.Context, req EnableAllRequest) (BulkResu
 				LastAllTime: target.client.AllTime,
 				UpdatedAt:   now,
 			}); err != nil {
-				return err
-			}
-			if err := tx.AddEvent(ctx, &ruleID, store.EventRuleEnabled, "rule enabled by enable-all", now); err != nil {
 				return err
 			}
 			result.Changed++
@@ -144,11 +174,22 @@ func (s *Service) ResumeAll(ctx context.Context, selector BulkSelector) (BulkRes
 		result.Matched = len(rules)
 
 		for _, rule := range rules {
+			if conflict, trafficID, err := tx.ActiveConflictForRule(ctx, rule.ID); err == nil {
+				result.Conflicts++
+				message := fmt.Sprintf("resume skipped; active rule %d already targets traffic id %d", conflict.ID, trafficID)
+				if err := tx.AddEvent(ctx, &rule.ID, store.EventRuleResumed, message, now); err != nil {
+					return err
+				}
+				continue
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+
 			count, err := tx.RefreshRuleClientBaselinesCount(ctx, rule.ID, now)
 			if err != nil {
 				return err
 			}
-			if count == 0 {
+			if count == 0 && rule.Scope == nil {
 				result.Missing++
 				continue
 			}
@@ -163,6 +204,13 @@ func (s *Service) ResumeAll(ctx context.Context, selector BulkSelector) (BulkRes
 		return nil
 	})
 	return result, err
+}
+
+func scopedRuleInboundID(inboundID *int64) int64 {
+	if inboundID == nil {
+		return 0
+	}
+	return *inboundID
 }
 
 func (s *Service) bulkTransition(ctx context.Context, selector BulkSelector, command string, from []string, to string) (BulkResult, error) {

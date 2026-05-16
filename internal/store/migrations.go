@@ -34,6 +34,15 @@ var migrationStatements = []string{
 		updated_at INTEGER NOT NULL,
 		PRIMARY KEY(rule_id, traffic_id)
 	)`,
+	`CREATE TABLE IF NOT EXISTS xui_factor_scopes (
+		rule_id INTEGER PRIMARY KEY,
+		inbound_id INTEGER,
+		limited_only INTEGER NOT NULL DEFAULT 0,
+		include_disabled_clients INTEGER NOT NULL DEFAULT 0,
+		once INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		rule_id INTEGER,
@@ -47,6 +56,12 @@ var migrationStatements = []string{
 		ON xui_factor_rules(email, inbound_id, state)`,
 	`CREATE INDEX IF NOT EXISTS idx_xui_factor_rule_clients_traffic
 		ON xui_factor_rule_clients(traffic_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_rule_clients_missing
+		ON xui_factor_rule_clients(missing_since)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_scopes_inbound
+		ON xui_factor_scopes(inbound_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_events_created
+		ON xui_factor_events(created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_xui_factor_events_rule_created
 		ON xui_factor_events(rule_id, created_at)`,
 }

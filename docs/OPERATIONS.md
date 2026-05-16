@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.1.0-beta_linux_amd64.tar.gz
-cd xui-factor_v0.1.0-beta_linux_amd64
+tar -xzf xui-factor_v0.2.0-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.0-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -41,6 +41,15 @@ service: xui-factor.service
 ```
 
 The default config points at the standard 3x-ui SQLite database path. Use `--config PATH` to run commands with a different config file.
+
+Cleanup defaults:
+
+```text
+auto_cleanup: true
+missing_client_grace: 30s
+disabled_rule_retention: 7d
+audit_retention: 30d
+```
 
 ## 5. First health check
 
@@ -82,6 +91,8 @@ Apply a factor to all enabled clients:
 xui-factor enable-all --factor 1.2
 ```
 
+`enable-all` is persistent by default. Current matching clients are enrolled immediately, and future matching clients are enrolled by the daemon tick from their current counters. Traffic that happened before enrollment is not multiplied.
+
 Apply a factor only to clients with a configured traffic limit:
 
 ```sh
@@ -93,6 +104,14 @@ Apply a factor only within one inbound:
 ```sh
 xui-factor enable-all --factor 1.2 --inbound-id 1
 ```
+
+Use snapshot mode to target only clients that exist when the command runs:
+
+```sh
+xui-factor enable-all --factor 1.2 --once
+```
+
+Paused and disabled bulk scopes do not enroll new clients. Resuming a paused scope refreshes existing baselines before enrollment continues.
 
 Test a single-user rule before using `enable-all` on a production server.
 
@@ -195,7 +214,35 @@ xui-factor audit --email User --inbound-id 1
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
 
-## 14. Update workflow
+## 14. Metadata cleanup
+
+The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id, inbound id, and email. Missing client tracking is pruned after the grace period.
+
+Run a dry run before manual cleanup on production servers:
+
+```sh
+xui-factor cleanup --dry-run
+```
+
+Run cleanup with configured retention:
+
+```sh
+xui-factor cleanup
+```
+
+Override disabled-rule and audit retention for one run:
+
+```sh
+xui-factor cleanup --older-than 24h
+```
+
+Cleanup prunes only XuiFactor metadata. It never modifies 3x-ui counters and does not subtract previously factored traffic. SQLite `VACUUM` is explicit only:
+
+```sh
+xui-factor cleanup --vacuum
+```
+
+## 15. Update workflow
 
 From a new release package, run:
 
@@ -205,7 +252,7 @@ sudo ./scripts/update.sh
 
 The update workflow preserves existing config, refreshes installed package files, and restarts `xui-factor.service` only when it was active before the update.
 
-## 15. Uninstall workflow
+## 16. Uninstall workflow
 
 Remove the installed binary, service, and shared package files while preserving config and backups:
 
@@ -221,7 +268,7 @@ sudo ./scripts/uninstall.sh --purge
 
 Uninstall and purge must not remove `/etc/x-ui/x-ui.db`.
 
-## 16. Recovery expectations
+## 17. Recovery expectations
 
 XuiFactor does not automatically restore backups. To recover from a selected backup:
 
@@ -235,11 +282,12 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 
 Keep backup files until the recovered server has been verified.
 
-## 17. Safety checklist
+## 18. Safety checklist
 
 - Run `xui-factor doctor` first.
 - Run `xui-factor backup` before broad changes.
 - Test a single user before `enable-all`.
 - Use `--limited-only` if unlimited clients should be skipped.
+- Run `xui-factor cleanup --dry-run` before manual metadata cleanup.
 - Verify `xui-factor status` and `xui-factor audit` after changes.
 - Keep backup files before uninstall or purge.

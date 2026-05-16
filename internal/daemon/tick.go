@@ -26,6 +26,8 @@ type Runner struct {
 
 type TickResult struct {
 	ActiveClients int
+	Enrolled      int
+	EnrollSkipped int
 	Applied       int
 	Baselined     int
 	Rebaselined   int
@@ -57,12 +59,14 @@ func NewWithClock(st *store.Store, cfg config.Config, out, err io.Writer, now fu
 }
 
 func (r TickResult) HasWork() bool {
-	return r.Applied > 0 || r.Baselined > 0 || r.Rebaselined > 0 || r.Missing > 0
+	return r.Enrolled > 0 || r.EnrollSkipped > 0 || r.Applied > 0 || r.Baselined > 0 || r.Rebaselined > 0 || r.Missing > 0
 }
 
 func (r TickResult) Summary() string {
-	return fmt.Sprintf("active=%d applied=%d baselined=%d rebaselined=%d missing=%d",
+	return fmt.Sprintf("active=%d enrolled=%d enroll_skipped=%d applied=%d baselined=%d rebaselined=%d missing=%d",
 		r.ActiveClients,
+		r.Enrolled,
+		r.EnrollSkipped,
 		r.Applied,
 		r.Baselined,
 		r.Rebaselined,
@@ -75,6 +79,13 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 	var result TickResult
 
 	err := r.store.WithImmediateTx(ctx, func(tx *store.Tx) error {
+		enrolled, skipped, err := r.reconcileScopes(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		result.Enrolled = enrolled
+		result.EnrollSkipped = skipped
+
 		targets, err := tx.ListActiveRuleClients(ctx)
 		if err != nil {
 			return err
@@ -99,7 +110,113 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 	if err != nil {
 		return TickResult{}, fmt.Errorf("tick aborted and transaction rolled back: %w", err)
 	}
+	r.runAutoCleanup(ctx, now)
 	return result, nil
+}
+
+func (r *Runner) runAutoCleanup(ctx context.Context, now int64) {
+	if !r.cfg.AutoCleanup {
+		return
+	}
+	result, ran, err := r.store.AutoCleanup(ctx, store.CleanupOptions{
+		Now:                   now,
+		MissingClientGrace:    cleanupDurationSeconds(r.cfg.MissingClientGrace),
+		DisabledRuleRetention: cleanupDurationSeconds(r.cfg.DisabledRuleRetention),
+		AuditRetention:        cleanupDurationSeconds(r.cfg.AuditRetention),
+	})
+	if err != nil {
+		fmt.Fprintf(r.err, "cleanup: error: %v\n", err)
+		return
+	}
+	if ran && (result.MissingClientsPruned > 0 || result.DisabledRulesPruned > 0 || result.DisabledScopesPruned > 0 || result.AuditEventsPruned > 0) {
+		fmt.Fprintf(r.out, "cleanup: missing_clients_pruned=%d disabled_rules_pruned=%d disabled_scopes_pruned=%d audit_events_pruned=%d vacuum_run=false\n",
+			result.MissingClientsPruned,
+			result.DisabledRulesPruned,
+			result.DisabledScopesPruned,
+			result.AuditEventsPruned,
+		)
+	}
+}
+
+func cleanupDurationSeconds(d time.Duration) int64 {
+	seconds := int64(d / time.Second)
+	if seconds <= 0 {
+		return 1
+	}
+	return seconds
+}
+
+func (r *Runner) reconcileScopes(ctx context.Context, tx *store.Tx, now int64) (int, int, error) {
+	scopes, err := tx.ListActivePersistentScopes(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	enrolled := 0
+	skipped := 0
+	for _, scope := range scopes {
+		clients, err := tx.ListClientCandidates(ctx, store.ClientFilter{
+			InboundID:              scope.InboundID,
+			LimitedOnly:            scope.LimitedOnly,
+			IncludeDisabledClients: scope.IncludeDisabledClients,
+		})
+		if err != nil {
+			return 0, 0, err
+		}
+
+		seen := make(map[int64]struct{}, len(clients))
+		for _, client := range clients {
+			if _, ok := seen[client.ID]; ok {
+				message := fmt.Sprintf("traffic id %d skipped; duplicate candidate", client.ID)
+				if err := tx.AddEvent(ctx, &scope.RuleID, store.EventScopeSkip, message, now); err != nil {
+					return 0, 0, err
+				}
+				skipped++
+				continue
+			}
+			seen[client.ID] = struct{}{}
+
+			exists, err := tx.RuleClientExists(ctx, scope.RuleID, client.ID)
+			if err != nil {
+				return 0, 0, err
+			}
+			if exists {
+				continue
+			}
+
+			conflict, err := tx.ActiveRuleForTrafficExcept(ctx, client.ID, scope.RuleID)
+			if err == nil {
+				message := fmt.Sprintf("traffic id %d skipped; active rule %d already targets it", client.ID, conflict.ID)
+				if err := tx.AddEvent(ctx, &scope.RuleID, store.EventScopeSkip, message, now); err != nil {
+					return 0, 0, err
+				}
+				skipped++
+				continue
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				return 0, 0, err
+			}
+
+			if err := tx.CreateRuleClient(ctx, store.RuleClient{
+				RuleID:      scope.RuleID,
+				TrafficID:   client.ID,
+				InboundID:   client.InboundID,
+				Email:       client.Email,
+				LastUp:      client.Up,
+				LastDown:    client.Down,
+				LastAllTime: client.AllTime,
+				UpdatedAt:   now,
+			}); err != nil {
+				return 0, 0, err
+			}
+			message := fmt.Sprintf("traffic id %d auto-enrolled email=%s inbound=%d", client.ID, client.Email, client.InboundID)
+			if err := tx.AddEvent(ctx, &scope.RuleID, store.EventScopeEnroll, message, now); err != nil {
+				return 0, 0, err
+			}
+			enrolled++
+		}
+	}
+	return enrolled, skipped, nil
 }
 
 type targetResult struct {
@@ -119,6 +236,16 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	}
 	if current.InboundID != target.Client.InboundID || current.Email != target.Client.Email {
 		return r.markMissing(ctx, tx, target, now)
+	}
+	if target.Client.MissingAt != nil {
+		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, 0, now)); err != nil {
+			return targetResult{}, err
+		}
+		message := fmt.Sprintf("traffic id %d returned; baseline refreshed", target.Client.TrafficID)
+		if err := tx.AddEvent(ctx, &target.Rule.ID, store.EventClientReset, message, now); err != nil {
+			return targetResult{}, err
+		}
+		return targetResult{Rebaselined: 1}, nil
 	}
 
 	rawUpDelta, upDecreased, err := counterDelta(current.Up, target.Client.LastUp)

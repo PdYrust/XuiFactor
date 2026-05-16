@@ -67,19 +67,130 @@ func TestCLIBulkLifecycleSmoke(t *testing.T) {
 		return out.String()
 	}
 
-	if output := run("enable-all", "--factor", "1.2"); !strings.Contains(output, "changed=2") {
+	if output := run("enable-all", "--factor", "2"); !strings.Contains(output, "mode=persistent") || !strings.Contains(output, "changed=2") {
 		t.Fatalf("expected enable-all summary, got %q", output)
 	}
-	if output := run("status"); !strings.Contains(output, "state=active") {
-		t.Fatalf("expected active status, got %q", output)
+	if output := run("status"); !strings.Contains(output, "state=active") || !strings.Contains(output, "scope=persistent") {
+		t.Fatalf("expected active scope status, got %q", output)
 	}
-	if output := run("pause-all"); !strings.Contains(output, "changed=2") {
+	if output := run("pause-all"); !strings.Contains(output, "changed=1") {
 		t.Fatalf("expected pause-all summary, got %q", output)
 	}
-	if output := run("resume-all"); !strings.Contains(output, "changed=2") {
+	if output := run("resume-all"); !strings.Contains(output, "changed=1") {
 		t.Fatalf("expected resume-all summary, got %q", output)
 	}
-	if output := run("disable-all"); !strings.Contains(output, "changed=2") {
+	if output := run("disable-all"); !strings.Contains(output, "changed=1") {
+		t.Fatalf("expected disable-all summary, got %q", output)
+	}
+}
+
+func TestCLIPersistentScopeSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 2, 2, "b@example.com", 400, 500, 900)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	if output := run("enable-all", "--inbound-id", "1", "--factor", "2"); !strings.Contains(output, "mode=persistent") || !strings.Contains(output, "changed=1") {
+		t.Fatalf("expected inbound persistent summary, got %q", output)
+	}
+	if output := run("status"); !strings.Contains(output, "scope=persistent,inbound=1") || !strings.Contains(output, "clients=1") {
+		t.Fatalf("expected inbound scope status, got %q", output)
+	}
+	insertCLITestTraffic(t, dbPath, 3, 1, "c@example.com", 1000, 2000, 3000)
+	if output := run("tick"); !strings.Contains(output, "enrolled=1") {
+		t.Fatalf("expected tick enrollment, got %q", output)
+	}
+	if output := run("audit"); !strings.Contains(output, "scope_auto_enroll") {
+		t.Fatalf("expected scope enrollment audit, got %q", output)
+	}
+	if output := run("disable-all"); !strings.Contains(output, "changed=1") {
+		t.Fatalf("expected disable-all summary, got %q", output)
+	}
+}
+
+func TestCLIEnableAllOnceSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	if output := run("enable-all", "--inbound-id", "1", "--factor", "2", "--once"); !strings.Contains(output, "mode=snapshot") || !strings.Contains(output, "changed=1") {
+		t.Fatalf("expected snapshot summary, got %q", output)
+	}
+	insertCLITestTraffic(t, dbPath, 2, 1, "future@example.com", 1000, 2000, 3000)
+	if output := run("tick"); !strings.Contains(output, "enrolled=0") {
+		t.Fatalf("expected no snapshot enrollment, got %q", output)
+	}
+}
+
+func TestCLICleanupSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	if output := run("enable-all", "--inbound-id", "1", "--factor", "2"); !strings.Contains(output, "mode=persistent") {
+		t.Fatalf("expected enable-all summary, got %q", output)
+	}
+	if output := run("tick"); !strings.Contains(output, "active=") {
+		t.Fatalf("expected tick summary, got %q", output)
+	}
+	if output := run("status"); !strings.Contains(output, "scope=persistent,inbound=1") {
+		t.Fatalf("expected status scope output, got %q", output)
+	}
+	if output := run("audit"); !strings.Contains(output, "rule_enabled") {
+		t.Fatalf("expected audit output, got %q", output)
+	}
+	if output := run("cleanup", "--dry-run"); !strings.Contains(output, "vacuum_run=false") {
+		t.Fatalf("expected dry-run cleanup summary, got %q", output)
+	}
+	if output := run("cleanup"); !strings.Contains(output, "cleanup:") {
+		t.Fatalf("expected cleanup summary, got %q", output)
+	}
+	if output := run("cleanup", "--older-than", "1h"); !strings.Contains(output, "cleanup:") {
+		t.Fatalf("expected older-than cleanup summary, got %q", output)
+	}
+	if output := run("cleanup", "--vacuum"); !strings.Contains(output, "vacuum_run=true") {
+		t.Fatalf("expected vacuum cleanup summary, got %q", output)
+	}
+	if output := run("disable-all"); !strings.Contains(output, "changed=1") {
 		t.Fatalf("expected disable-all summary, got %q", output)
 	}
 }

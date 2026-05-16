@@ -132,6 +132,11 @@ func (s *Service) Resume(ctx context.Context, selector RuleSelector) (store.Rule
 		if err != nil {
 			return describeSelectorError("find paused rule", err)
 		}
+		if conflict, trafficID, err := tx.ActiveConflictForRule(ctx, rule.ID); err == nil {
+			return store.ConflictError("active rule %d already targets traffic id %d", conflict.ID, trafficID)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
 		if err := tx.RefreshRuleClientBaselines(ctx, rule.ID, now); err != nil {
 			return describeSelectorError("refresh rule baseline", err)
 		}

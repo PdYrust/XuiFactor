@@ -11,7 +11,7 @@ import (
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
-func TestEnableAllAppliesRulesToEnabledClients(t *testing.T) {
+func TestEnableAllPersistentAllUsersScopeEnrollsExistingClients(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
 		{id: 1, inboundID: 1, enable: 1, email: "a@example.com"},
@@ -26,8 +26,17 @@ func TestEnableAllAppliesRulesToEnabledClients(t *testing.T) {
 	if result.Matched != 2 || result.Changed != 2 || result.SkippedExisting != 0 {
 		t.Fatalf("result = %#v, want matched 2 changed 2", result)
 	}
-	if got := countBulkRules(t, dbPath, store.StateActive); got != 2 {
-		t.Fatalf("active rules = %d, want 2", got)
+	if result.Mode != "persistent" {
+		t.Fatalf("mode = %q, want persistent", result.Mode)
+	}
+	if got := countBulkRules(t, dbPath, store.StateActive); got != 1 {
+		t.Fatalf("active rules = %d, want 1", got)
+	}
+	if got := countBulkRuleClients(t, dbPath); got != 2 {
+		t.Fatalf("rule clients = %d, want 2", got)
+	}
+	if got := countBulkScopes(t, dbPath, false); got != 1 {
+		t.Fatalf("persistent scopes = %d, want 1", got)
 	}
 }
 
@@ -47,12 +56,15 @@ func TestEnableAllLimitedOnlyTargetsTotalGreaterThanZero(t *testing.T) {
 	if result.Matched != 2 || result.Changed != 2 {
 		t.Fatalf("result = %#v, want matched 2 changed 2", result)
 	}
-	if got := countBulkRules(t, dbPath, store.StateActive); got != 2 {
-		t.Fatalf("active rules = %d, want 2", got)
+	if got := countBulkRules(t, dbPath, store.StateActive); got != 1 {
+		t.Fatalf("active rules = %d, want 1", got)
+	}
+	if got := countBulkRuleClients(t, dbPath); got != 2 {
+		t.Fatalf("rule clients = %d, want 2", got)
 	}
 }
 
-func TestEnableAllInboundIDOnlyTargetsThatInbound(t *testing.T) {
+func TestEnableAllPersistentInboundScopeEnrollsExistingClients(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(2)
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
@@ -69,8 +81,14 @@ func TestEnableAllInboundIDOnlyTargetsThatInbound(t *testing.T) {
 	if result.Matched != 2 || result.Changed != 2 {
 		t.Fatalf("result = %#v, want matched 2 changed 2", result)
 	}
-	if got := countBulkRulesForInbound(t, dbPath, store.StateActive, 2); got != 2 {
-		t.Fatalf("inbound 2 active rules = %d, want 2", got)
+	if got := countBulkRulesForInbound(t, dbPath, store.StateActive, 2); got != 1 {
+		t.Fatalf("inbound 2 active rules = %d, want 1", got)
+	}
+	if got := countBulkRuleClients(t, dbPath); got != 2 {
+		t.Fatalf("rule clients = %d, want 2", got)
+	}
+	if got := countBulkScopesForInbound(t, dbPath, 2); got != 1 {
+		t.Fatalf("inbound scopes = %d, want 1", got)
 	}
 }
 
@@ -113,8 +131,8 @@ func TestDisableAllDisablesActiveAndPausedWithoutChangingCounters(t *testing.T) 
 	if _, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2"}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
-	if _, err := svc.Pause(ctx, RuleSelector{Email: "b@example.com"}); err != nil {
-		t.Fatalf("pause: %v", err)
+	if _, err := svc.PauseAll(ctx, BulkSelector{}); err != nil {
+		t.Fatalf("pause all: %v", err)
 	}
 	setBulkCounters(t, dbPath, 1, 100, 200, 300)
 	setBulkCounters(t, dbPath, 2, 400, 500, 900)
@@ -123,11 +141,11 @@ func TestDisableAllDisablesActiveAndPausedWithoutChangingCounters(t *testing.T) 
 	if err != nil {
 		t.Fatalf("disable all: %v", err)
 	}
-	if result.Matched != 2 || result.Changed != 2 {
-		t.Fatalf("result = %#v, want matched 2 changed 2", result)
+	if result.Matched != 1 || result.Changed != 1 {
+		t.Fatalf("result = %#v, want matched 1 changed 1", result)
 	}
-	if got := countBulkRules(t, dbPath, store.StateDisabled); got != 2 {
-		t.Fatalf("disabled rules = %d, want 2", got)
+	if got := countBulkRules(t, dbPath, store.StateDisabled); got != 1 {
+		t.Fatalf("disabled rules = %d, want 1", got)
 	}
 	assertBulkCounters(t, dbPath, 1, 100, 200, 300)
 	assertBulkCounters(t, dbPath, 2, 400, 500, 900)
@@ -145,12 +163,6 @@ func TestPauseAllPausesOnlyActiveRules(t *testing.T) {
 	if _, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2"}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
-	if _, err := svc.Pause(ctx, RuleSelector{Email: "b@example.com"}); err != nil {
-		t.Fatalf("pause one: %v", err)
-	}
-	if _, err := svc.Disable(ctx, RuleSelector{Email: "c@example.com"}); err != nil {
-		t.Fatalf("disable one: %v", err)
-	}
 
 	result, err := svc.PauseAll(ctx, BulkSelector{})
 	if err != nil {
@@ -159,11 +171,8 @@ func TestPauseAllPausesOnlyActiveRules(t *testing.T) {
 	if result.Matched != 1 || result.Changed != 1 {
 		t.Fatalf("result = %#v, want matched 1 changed 1", result)
 	}
-	if got := countBulkRules(t, dbPath, store.StatePaused); got != 2 {
-		t.Fatalf("paused rules = %d, want 2", got)
-	}
-	if got := countBulkRules(t, dbPath, store.StateDisabled); got != 1 {
-		t.Fatalf("disabled rules = %d, want 1", got)
+	if got := countBulkRules(t, dbPath, store.StatePaused); got != 1 {
+		t.Fatalf("paused rules = %d, want 1", got)
 	}
 }
 
@@ -231,8 +240,34 @@ func TestEnableAllIncludeDisabledClients(t *testing.T) {
 	if result.Matched != 2 || result.Changed != 2 {
 		t.Fatalf("result = %#v, want matched 2 changed 2", result)
 	}
-	if got := countBulkRules(t, dbPath, store.StateActive); got != 2 {
-		t.Fatalf("active rules = %d, want 2", got)
+	if got := countBulkRules(t, dbPath, store.StateActive); got != 1 {
+		t.Fatalf("active rules = %d, want 1", got)
+	}
+	if got := countBulkRuleClients(t, dbPath); got != 2 {
+		t.Fatalf("rule clients = %d, want 2", got)
+	}
+}
+
+func TestEnableAllOnceCreatesSnapshotScope(t *testing.T) {
+	ctx := context.Background()
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{
+		{id: 1, inboundID: 1, enable: 1, email: "a@example.com"},
+		{id: 2, inboundID: 1, enable: 1, email: "b@example.com"},
+	})
+	defer st.Close()
+
+	result, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", Once: true})
+	if err != nil {
+		t.Fatalf("enable all once: %v", err)
+	}
+	if result.Mode != "snapshot" || result.Matched != 2 || result.Changed != 2 {
+		t.Fatalf("result = %#v, want snapshot matched 2 changed 2", result)
+	}
+	if got := countBulkScopes(t, dbPath, true); got != 1 {
+		t.Fatalf("snapshot scopes = %d, want 1", got)
+	}
+	if got := countBulkRuleClients(t, dbPath); got != 2 {
+		t.Fatalf("rule clients = %d, want 2", got)
 	}
 }
 
@@ -309,6 +344,43 @@ func countBulkRulesForInbound(t *testing.T, dbPath, state string, inboundID int6
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_rules WHERE state=? AND inbound_id=?`, state, inboundID).Scan(&count); err != nil {
 		t.Fatalf("count rules by inbound: %v", err)
+	}
+	return count
+}
+
+func countBulkRuleClients(t *testing.T, dbPath string) int {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_rule_clients`).Scan(&count); err != nil {
+		t.Fatalf("count rule clients: %v", err)
+	}
+	return count
+}
+
+func countBulkScopes(t *testing.T, dbPath string, once bool) int {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	var count int
+	onceValue := 0
+	if once {
+		onceValue = 1
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_scopes WHERE once=?`, onceValue).Scan(&count); err != nil {
+		t.Fatalf("count scopes: %v", err)
+	}
+	return count
+}
+
+func countBulkScopesForInbound(t *testing.T, dbPath string, inboundID int64) int {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_scopes WHERE inbound_id=?`, inboundID).Scan(&count); err != nil {
+		t.Fatalf("count scopes by inbound: %v", err)
 	}
 	return count
 }
