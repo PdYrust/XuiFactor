@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.2.0-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.0-beta_linux_amd64
+tar -xzf xui-factor_v0.2.1-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.1-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -83,6 +83,8 @@ Apply a factor to enabled clients. By default, `enable-all` creates a persistent
 ```sh
 xui-factor enable-all --factor 1.2
 ```
+
+When possible, persistent `enable-all` also consolidates compatible active single-user rules into the scope while preserving their baselines.
 
 Apply a factor only to limited clients:
 

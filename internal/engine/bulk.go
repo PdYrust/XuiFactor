@@ -25,6 +25,7 @@ type BulkSelector struct {
 type BulkResult struct {
 	Matched         int
 	Changed         int
+	Adopted         int
 	SkippedExisting int
 	Conflicts       int
 	Missing         int
@@ -36,10 +37,11 @@ func (r BulkResult) Summary() string {
 	if r.Mode != "" {
 		prefix = "mode=" + r.Mode + " "
 	}
-	return fmt.Sprintf("%smatched=%d changed=%d skipped=%d conflicts=%d missing=%d",
+	return fmt.Sprintf("%smatched=%d changed=%d adopted=%d skipped=%d conflicts=%d missing=%d",
 		prefix,
 		r.Matched,
 		r.Changed,
+		r.Adopted,
 		r.SkippedExisting,
 		r.Conflicts,
 		r.Missing,
@@ -75,29 +77,87 @@ func (s *Service) EnableAll(ctx context.Context, req EnableAllRequest) (BulkResu
 			return err
 		}
 
-		type createTarget struct {
-			client store.ClientTraffic
+		if req.Once {
+			return s.enableAllSnapshot(ctx, tx, req, factorPPM, clients, now, &result)
 		}
-		targets := make([]createTarget, 0, len(clients))
-		for _, client := range clients {
-			rules, err := tx.RulesForTrafficInStates(ctx, client.ID, store.StateActive, store.StatePaused)
-			if err != nil {
-				return err
-			}
-			if len(rules) > 1 {
-				result.Conflicts++
-				return store.ConflictError("multiple active or paused rules already target traffic id %d", client.ID)
-			}
-			if len(rules) == 1 {
-				result.SkippedExisting++
-				continue
-			}
-			targets = append(targets, createTarget{client: client})
-		}
-		if req.Once && len(targets) == 0 {
-			return nil
-		}
+		return s.enableAllPersistent(ctx, tx, req, factorPPM, clients, now, &result)
+	})
+	return result, err
+}
 
+func (s *Service) enableAllSnapshot(ctx context.Context, tx *store.Tx, req EnableAllRequest, factorPPM int64, clients []store.ClientTraffic, now int64, result *BulkResult) error {
+	type createTarget struct {
+		client store.ClientTraffic
+	}
+	targets := make([]createTarget, 0, len(clients))
+	for _, client := range clients {
+		rules, err := tx.RulesForTrafficInStates(ctx, client.ID, store.StateActive, store.StatePaused)
+		if err != nil {
+			return err
+		}
+		if len(rules) > 1 {
+			result.Conflicts++
+			return store.ConflictError("multiple active or paused rules already target traffic id %d", client.ID)
+		}
+		if len(rules) == 1 {
+			result.SkippedExisting++
+			continue
+		}
+		targets = append(targets, createTarget{client: client})
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	ruleID, err := tx.CreateRule(ctx, store.Rule{
+		Name:        strings.TrimSpace(req.Name),
+		InboundID:   scopedRuleInboundID(req.InboundID),
+		Email:       "",
+		FactorPPM:   factorPPM,
+		State:       store.StateActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		ActivatedAt: &now,
+	})
+	if err != nil {
+		return err
+	}
+	if err := tx.CreateScope(ctx, store.Scope{
+		RuleID:                 ruleID,
+		InboundID:              req.InboundID,
+		LimitedOnly:            req.LimitedOnly,
+		IncludeDisabledClients: req.IncludeDisabledClients,
+		Once:                   true,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}); err != nil {
+		return err
+	}
+	if err := tx.AddEvent(ctx, &ruleID, store.EventRuleEnabled, "snapshot scope enabled by enable-all", now); err != nil {
+		return err
+	}
+
+	for _, target := range targets {
+		if err := tx.CreateRuleClient(ctx, store.RuleClient{
+			RuleID:      ruleID,
+			TrafficID:   target.client.ID,
+			InboundID:   target.client.InboundID,
+			Email:       target.client.Email,
+			LastUp:      target.client.Up,
+			LastDown:    target.client.Down,
+			LastAllTime: target.client.AllTime,
+			UpdatedAt:   now,
+		}); err != nil {
+			return err
+		}
+		result.Changed++
+	}
+	return nil
+}
+
+func (s *Service) enableAllPersistent(ctx context.Context, tx *store.Tx, req EnableAllRequest, factorPPM int64, clients []store.ClientTraffic, now int64, result *BulkResult) error {
+	scope, err := tx.FindActivePersistentScope(ctx, factorPPM, req.InboundID, req.LimitedOnly, req.IncludeDisabledClients)
+	if errors.Is(err, store.ErrNotFound) {
 		ruleID, err := tx.CreateRule(ctx, store.Rule{
 			Name:        strings.TrimSpace(req.Name),
 			InboundID:   scopedRuleInboundID(req.InboundID),
@@ -116,39 +176,166 @@ func (s *Service) EnableAll(ctx context.Context, req EnableAllRequest) (BulkResu
 			InboundID:              req.InboundID,
 			LimitedOnly:            req.LimitedOnly,
 			IncludeDisabledClients: req.IncludeDisabledClients,
-			Once:                   req.Once,
+			Once:                   false,
 			CreatedAt:              now,
 			UpdatedAt:              now,
 		}); err != nil {
 			return err
 		}
-
-		eventMessage := "persistent scope enabled by enable-all"
-		if req.Once {
-			eventMessage = "snapshot scope enabled by enable-all"
-		}
-		if err := tx.AddEvent(ctx, &ruleID, store.EventRuleEnabled, eventMessage, now); err != nil {
+		if err := tx.AddEvent(ctx, &ruleID, store.EventRuleEnabled, "persistent scope enabled by enable-all", now); err != nil {
 			return err
 		}
+		scope = store.Scope{
+			RuleID:                 ruleID,
+			InboundID:              req.InboundID,
+			LimitedOnly:            req.LimitedOnly,
+			IncludeDisabledClients: req.IncludeDisabledClients,
+			Once:                   false,
+			CreatedAt:              now,
+			UpdatedAt:              now,
+			Rule: store.Rule{
+				ID:        ruleID,
+				InboundID: scopedRuleInboundID(req.InboundID),
+				FactorPPM: factorPPM,
+				State:     store.StateActive,
+			},
+		}
+	} else if err != nil {
+		return err
+	}
 
-		for _, target := range targets {
+	for _, client := range clients {
+		exists, err := tx.RuleClientExists(ctx, scope.RuleID, client.ID)
+		if err != nil {
+			return err
+		}
+		if exists {
+			result.SkippedExisting++
+			continue
+		}
+
+		rules, err := tx.RulesForTrafficInStates(ctx, client.ID, store.StateActive, store.StatePaused)
+		if err != nil {
+			return err
+		}
+		if len(rules) > 1 {
+			result.Conflicts++
+			return store.ConflictError("multiple active or paused rules already target traffic id %d", client.ID)
+		}
+		if len(rules) == 0 {
 			if err := tx.CreateRuleClient(ctx, store.RuleClient{
-				RuleID:      ruleID,
-				TrafficID:   target.client.ID,
-				InboundID:   target.client.InboundID,
-				Email:       target.client.Email,
-				LastUp:      target.client.Up,
-				LastDown:    target.client.Down,
-				LastAllTime: target.client.AllTime,
+				RuleID:      scope.RuleID,
+				TrafficID:   client.ID,
+				InboundID:   client.InboundID,
+				Email:       client.Email,
+				LastUp:      client.Up,
+				LastDown:    client.Down,
+				LastAllTime: client.AllTime,
 				UpdatedAt:   now,
 			}); err != nil {
 				return err
 			}
 			result.Changed++
+			continue
 		}
-		return nil
-	})
-	return result, err
+
+		rule := rules[0]
+		hasScope, err := tx.RuleHasScope(ctx, rule.ID)
+		if err != nil {
+			return err
+		}
+		if hasScope {
+			result.Conflicts++
+			message := fmt.Sprintf("traffic id %d skipped; active scope rule %d already targets it", client.ID, rule.ID)
+			if err := tx.AddEvent(ctx, &scope.RuleID, store.EventScopeSkip, message, now); err != nil {
+				return err
+			}
+			continue
+		}
+		if rule.State != store.StateActive {
+			result.SkippedExisting++
+			if err := tx.AddEvent(ctx, &rule.ID, store.EventRuleSkip, "rule is not active", now); err != nil {
+				return err
+			}
+			continue
+		}
+
+		adopted, reason, err := s.adoptSingleRuleIntoScope(ctx, tx, scope, rule, client, now)
+		if err != nil {
+			return err
+		}
+		if adopted {
+			result.Adopted++
+			continue
+		}
+		result.SkippedExisting++
+		if reason != "" {
+			if err := tx.AddEvent(ctx, &rule.ID, store.EventRuleSkip, reason, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) adoptSingleRuleIntoScope(ctx context.Context, tx *store.Tx, scope store.Scope, rule store.Rule, client store.ClientTraffic, now int64) (bool, string, error) {
+	if rule.FactorPPM != scope.Rule.FactorPPM {
+		return false, "factor does not match scope", nil
+	}
+	if scope.InboundID != nil && rule.InboundID != *scope.InboundID {
+		return false, "inbound does not match scope", nil
+	}
+	if scope.LimitedOnly && client.Total <= 0 {
+		return false, "client is not limited", nil
+	}
+	if !scope.IncludeDisabledClients && client.Enable != 1 {
+		return false, "client is disabled", nil
+	}
+	count, err := tx.RuleClientCount(ctx, rule.ID)
+	if err != nil {
+		return false, "", err
+	}
+	if count != 1 {
+		return false, "rule does not have exactly one materialized client", nil
+	}
+	rc, err := tx.RuleClient(ctx, rule.ID, client.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, "rule client is missing", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	if rc.MissingAt != nil || rc.InboundID != client.InboundID || rc.Email != client.Email {
+		if err := tx.MarkRuleClientMissing(ctx, rule.ID, rc.TrafficID, now); err != nil {
+			return false, "", err
+		}
+		message := fmt.Sprintf("traffic id %d is missing or no longer matches rule target", rc.TrafficID)
+		if err := tx.AddEvent(ctx, &rule.ID, store.EventClientMissing, message, now); err != nil {
+			return false, "", err
+		}
+		return false, "rule client identity does not match", nil
+	}
+	if conflict, err := tx.ActiveScopeForTrafficExcept(ctx, client.ID, scope.RuleID); err == nil {
+		return false, fmt.Sprintf("active scope %d already targets traffic id %d", conflict.ID, client.ID), nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return false, "", err
+	}
+
+	if err := tx.CopyRuleClient(ctx, rule.ID, scope.RuleID, client.ID); err != nil {
+		return false, "", err
+	}
+	if err := tx.SetRuleMerged(ctx, rule.ID, now); err != nil {
+		return false, "", err
+	}
+	message := fmt.Sprintf("traffic id %d adopted from rule %d", client.ID, rule.ID)
+	if err := tx.AddEvent(ctx, &scope.RuleID, store.EventClientAdopted, message, now); err != nil {
+		return false, "", err
+	}
+	message = fmt.Sprintf("rule merged into scope %d", scope.RuleID)
+	if err := tx.AddEvent(ctx, &rule.ID, store.EventRuleMerged, message, now); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
 }
 
 func (s *Service) DisableAll(ctx context.Context, selector BulkSelector) (BulkResult, error) {

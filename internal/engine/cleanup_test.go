@@ -129,6 +129,36 @@ func TestCleanupPrunesDisabledSingleUserRulesAfterRetention(t *testing.T) {
 	assertBulkCounters(t, dbPath, 1, 10, 20, 30)
 }
 
+func TestCleanupPrunesMergedRulesAfterRetention(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
+	defer st.Close()
+
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "a@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	mergedRuleID := firstMergedRuleID(t, dbPath)
+	setCleanupDisabledAt(t, dbPath, mergedRuleID, 1_699_000_000)
+
+	result, err := svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig()})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.DisabledRulesPruned != 1 {
+		t.Fatalf("disabled rules pruned = %d, want 1", result.DisabledRulesPruned)
+	}
+	if got := countCleanupRulesInState(t, dbPath, store.StateMerged); got != 0 {
+		t.Fatalf("merged rules = %d, want 0", got)
+	}
+	if got := countCleanupScopes(t, dbPath); got != 1 {
+		t.Fatalf("scope rules = %d, want 1", got)
+	}
+}
+
 func TestCleanupDoesNotRemoveDatabaseFile(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
@@ -295,6 +325,17 @@ func firstCleanupRuleID(t *testing.T, dbPath string) int64 {
 	return id
 }
 
+func firstMergedRuleID(t *testing.T, dbPath string) int64 {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	var id int64
+	if err := db.QueryRow(`SELECT id FROM xui_factor_rules WHERE state=? ORDER BY id LIMIT 1`, store.StateMerged).Scan(&id); err != nil {
+		t.Fatalf("read merged rule id: %v", err)
+	}
+	return id
+}
+
 func setCleanupRuleClientMissing(t *testing.T, dbPath string, ruleID, trafficID, missingSince int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
@@ -346,6 +387,17 @@ func countCleanupRules(t *testing.T, dbPath string) int {
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	return countCleanupRows(t, db, `SELECT COUNT(*) FROM xui_factor_rules`)
+}
+
+func countCleanupRulesInState(t *testing.T, dbPath, state string) int {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_rules WHERE state=?`, state).Scan(&count); err != nil {
+		t.Fatalf("count rules in state: %v", err)
+	}
+	return count
 }
 
 func countCleanupScopes(t *testing.T, dbPath string) int {
