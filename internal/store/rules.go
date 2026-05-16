@@ -192,9 +192,11 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 	query := `
 		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
 			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at,
-			COUNT(rc.traffic_id) AS client_count
+			COALESCE(SUM(CASE WHEN rc.missing_since IS NULL THEN 1 ELSE 0 END), 0) AS client_count,
+			s.rule_id, s.inbound_id, s.limited_only, s.include_disabled_clients, s.once, s.created_at, s.updated_at
 		FROM xui_factor_rules r
-		LEFT JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id`
+		LEFT JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
+		LEFT JOIN xui_factor_scopes s ON s.rule_id = r.id`
 	if includeDisabled {
 		query += " GROUP BY r.id ORDER BY r.id"
 	} else {
@@ -215,7 +217,7 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 
 	var rules []Rule
 	for rows.Next() {
-		rule, err := scanRuleRowsWithCount(rows)
+		rule, err := scanRuleRowsWithCountAndScope(rows)
 		if err != nil {
 			return nil, err
 		}

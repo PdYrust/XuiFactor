@@ -80,47 +80,6 @@ func (tx *Tx) RulesForTrafficInStates(ctx context.Context, trafficID int64, stat
 	return rules, nil
 }
 
-func (tx *Tx) ListRulesInStates(ctx context.Context, inboundID *int64, states ...string) ([]Rule, error) {
-	if len(states) == 0 {
-		return nil, nil
-	}
-	placeholders := make([]string, 0, len(states))
-	args := make([]any, 0, len(states)+1)
-	for _, state := range states {
-		placeholders = append(placeholders, "?")
-		args = append(args, state)
-	}
-	query := `
-		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
-			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at
-		FROM xui_factor_rules r
-		WHERE r.state IN (` + strings.Join(placeholders, ",") + `)`
-	if inboundID != nil {
-		query += " AND r.inbound_id = ?"
-		args = append(args, *inboundID)
-	}
-	query += " ORDER BY r.id"
-
-	rows, err := tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var rules []Rule
-	for rows.Next() {
-		rule, err := scanRuleRows(rows)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, rule)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return rules, nil
-}
-
 func (tx *Tx) RefreshRuleClientBaselinesCount(ctx context.Context, ruleID, now int64) (int, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT rc.traffic_id, ct.inbound_id, ct.email, ct.up, ct.down, ct.all_time

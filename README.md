@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.1.0-beta_linux_amd64.tar.gz
-cd xui-factor_v0.1.0-beta_linux_amd64
+tar -xzf xui-factor_v0.2.0-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.0-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -58,8 +58,10 @@ xui-factor backup
 xui-factor enable --email User --inbound-id 1 --factor 1.2
 xui-factor enable-all --factor 1.2
 xui-factor enable-all --factor 1.2 --limited-only
+xui-factor enable-all --factor 1.2 --once
 xui-factor disable --email User --inbound-id 1
 xui-factor disable-all
+xui-factor cleanup --dry-run
 xui-factor status
 xui-factor audit --email User --inbound-id 1
 xui-factor tick
@@ -76,7 +78,7 @@ xui-factor enable --email user@example.com --inbound-id 1 --factor 1.2
 xui-factor status
 ```
 
-Apply a factor to enabled clients:
+Apply a factor to enabled clients. By default, `enable-all` creates a persistent scope, so future matching clients are enrolled automatically from their current counters:
 
 ```sh
 xui-factor enable-all --factor 1.2
@@ -86,6 +88,12 @@ Apply a factor only to limited clients:
 
 ```sh
 xui-factor enable-all --factor 1.2 --limited-only
+```
+
+Use snapshot mode when only current clients should be targeted:
+
+```sh
+xui-factor enable-all --factor 1.2 --once
 ```
 
 Stop applying factors:
@@ -100,6 +108,12 @@ xui-factor disable-all
 `factor 1.2` means new traffic is counted as 120%. `factor 5` means new traffic is counted as 500%.
 
 Disabling a rule does not revert previously factored traffic. Traffic recorded after disabling is counted normally by 3x-ui.
+
+## Metadata Cleanup
+
+XuiFactor keeps its own metadata bounded with automatic cleanup enabled by default. Missing client tracking is pruned after 30 seconds, disabled rules after 7 days, and audit events after 30 days.
+
+Use `xui-factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata and never modifies 3x-ui counters. SQLite `VACUUM` runs only when explicitly requested with `xui-factor cleanup --vacuum`.
 
 ## Safety Notes
 

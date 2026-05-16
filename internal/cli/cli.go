@@ -85,6 +85,8 @@ func (a *App) Run(args []string) int {
 		return a.runAudit(ctx, common, args[1:])
 	case "backup":
 		return a.runBackup(ctx, common, args[1:])
+	case "cleanup":
+		return a.runCleanup(ctx, common, args[1:])
 	case "tick":
 		return a.runTick(ctx, common, args[1:])
 	case "run":
@@ -321,6 +323,7 @@ func (a *App) runEnableAll(ctx context.Context, opts commonOptions, args []strin
 		InboundID:              flags.inboundID,
 		LimitedOnly:            flags.limitedOnly,
 		IncludeDisabledClients: flags.includeDisabledClients,
+		Once:                   flags.once,
 		Name:                   flags.name,
 	})
 	if err != nil {
@@ -536,6 +539,39 @@ func (a *App) runBackup(ctx context.Context, opts commonOptions, args []string) 
 	return 0
 }
 
+func (a *App) runCleanup(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseCleanupArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, cfg, err := a.openService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	result, err := svc.Cleanup(ctx, engine.CleanupRequest{
+		Config:    cfg,
+		DryRun:    flags.dryRun,
+		OlderThan: flags.olderThan,
+		Vacuum:    flags.vacuum,
+	})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	fmt.Fprintf(a.Out, "cleanup: missing_clients_pruned=%d disabled_rules_pruned=%d disabled_scopes_pruned=%d audit_events_pruned=%d vacuum_run=%t\n",
+		result.MissingClientsPruned,
+		result.DisabledRulesPruned,
+		result.DisabledScopesPruned,
+		result.AuditEventsPruned,
+		result.VacuumRun,
+	)
+	return 0
+}
+
 func (a *App) runTick(ctx context.Context, opts commonOptions, args []string) int {
 	if len(args) != 0 {
 		a.printError(fmt.Errorf("tick: unexpected argument %q", args[0]))
@@ -744,7 +780,14 @@ type enableAllFlags struct {
 	inboundID              *int64
 	limitedOnly            bool
 	includeDisabledClients bool
+	once                   bool
 	name                   string
+}
+
+type cleanupFlags struct {
+	dryRun    bool
+	olderThan time.Duration
+	vacuum    bool
 }
 
 func parseEnableArgs(args []string) (enableFlags, error) {
@@ -853,12 +896,47 @@ func parseEnableAllArgs(args []string) (enableAllFlags, error) {
 			flags.limitedOnly = true
 		case arg == "--include-disabled-clients":
 			flags.includeDisabledClients = true
+		case arg == "--once":
+			flags.once = true
 		default:
 			return flags, fmt.Errorf("enable-all: unknown argument %q", arg)
 		}
 	}
 	if strings.TrimSpace(flags.factor) == "" {
 		return flags, errors.New("enable-all: --factor is required")
+	}
+	return flags, nil
+}
+
+func parseCleanupArgs(args []string) (cleanupFlags, error) {
+	var flags cleanupFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--dry-run":
+			flags.dryRun = true
+		case arg == "--vacuum":
+			flags.vacuum = true
+		case arg == "--older-than":
+			value, next, err := readFlagValue(args, i, "--older-than")
+			if err != nil {
+				return flags, err
+			}
+			d, err := time.ParseDuration(value)
+			if err != nil || d <= 0 {
+				return flags, errors.New("cleanup: --older-than must be a positive duration")
+			}
+			flags.olderThan = d
+			i = next
+		case strings.HasPrefix(arg, "--older-than="):
+			d, err := time.ParseDuration(strings.TrimPrefix(arg, "--older-than="))
+			if err != nil || d <= 0 {
+				return flags, errors.New("cleanup: --older-than must be a positive duration")
+			}
+			flags.olderThan = d
+		default:
+			return flags, fmt.Errorf("cleanup: unknown argument %q", arg)
+		}
 	}
 	return flags, nil
 }
@@ -961,6 +1039,17 @@ func printRule(w io.Writer, rule store.Rule) {
 	if rule.Name != "" {
 		name = " name=" + rule.Name
 	}
+	if rule.Scope != nil {
+		fmt.Fprintf(w, "rule=%d state=%s scope=%s factor=%s clients=%d%s\n",
+			rule.ID,
+			rule.State,
+			store.ScopeDescription(rule.Scope),
+			engine.FormatFactor(rule.FactorPPM),
+			rule.ClientCount,
+			name,
+		)
+		return
+	}
 	fmt.Fprintf(w, "rule=%d state=%s email=%s inbound=%d factor=%s clients=%d%s\n",
 		rule.ID,
 		rule.State,
@@ -1006,6 +1095,7 @@ Commands:
   resume-all Resume paused rules from current counters
   audit      Show lifecycle events
   backup     Create a timestamped SQLite backup
+  cleanup    Prune stale XuiFactor metadata
   tick       Apply one factor tick and exit
   run        Start the factor sidecar
 
@@ -1019,13 +1109,15 @@ Examples:
   %s enable --email user@example.com --factor 1.2
   %s enable-all --factor 1.2
   %s enable-all --factor 1.2 --limited-only
+  %s enable-all --factor 1.2 --once
   %s disable --email user@example.com
   %s disable-all
   %s backup
+  %s cleanup --dry-run
   %s doctor
   %s tick
   %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 func (a *App) printVersion(w io.Writer) {
