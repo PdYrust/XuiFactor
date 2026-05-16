@@ -509,6 +509,61 @@ func TestScopeAutoEnrollConflictIsSkippedSafely(t *testing.T) {
 	assertCounters(t, h.dbPath, 2, 1000, 2000, 3000)
 }
 
+func TestConsolidatedClientDoesNotDoubleApplyOnNextTick(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	defer h.store.Close()
+
+	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable single: %v", err)
+	}
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all consolidate: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 110, 220, 330)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.Applied != 1 {
+		t.Fatalf("applied = %d, want 1", result.Applied)
+	}
+	assertCounters(t, h.dbPath, 1, 120, 240, 360)
+	if got := countActiveTargetsForTraffic(t, h.dbPath, 1); got != 1 {
+		t.Fatalf("active targets = %d, want 1", got)
+	}
+}
+
+func TestPersistentAutoEnrollWorksAfterConsolidation(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	defer h.store.Close()
+
+	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable single: %v", err)
+	}
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all consolidate: %v", err)
+	}
+	ruleID := scopeRuleID(t, h.dbPath)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "future@example.com", 1000, 2000, 3000, 0)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.Enrolled != 1 {
+		t.Fatalf("enrolled = %d, want 1", result.Enrolled)
+	}
+	if !ruleClientExistsForRule(t, h.dbPath, ruleID, 2) {
+		t.Fatalf("future client was not enrolled into consolidated scope")
+	}
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000, lastAllTime: 3000})
+}
+
 func TestAutoCleanupRunsDuringTickWhenEnabled(t *testing.T) {
 	ctx := context.Background()
 	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
@@ -952,6 +1007,22 @@ func countRuleClients(t *testing.T, dbPath string) int {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_rule_clients`).Scan(&count); err != nil {
 		t.Fatalf("count rule clients: %v", err)
+	}
+	return count
+}
+
+func countActiveTargetsForTraffic(t *testing.T, dbPath string, trafficID int64) int {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM xui_factor_rule_clients rc
+		INNER JOIN xui_factor_rules r ON r.id = rc.rule_id
+		WHERE rc.traffic_id=? AND r.state=?
+	`, trafficID, store.StateActive).Scan(&count); err != nil {
+		t.Fatalf("count active targets: %v", err)
 	}
 	return count
 }

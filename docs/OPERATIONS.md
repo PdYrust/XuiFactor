@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.2.0-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.0-beta_linux_amd64
+tar -xzf xui-factor_v0.2.1-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.1-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -92,6 +92,8 @@ xui-factor enable-all --factor 1.2
 ```
 
 `enable-all` is persistent by default. Current matching clients are enrolled immediately, and future matching clients are enrolled by the daemon tick from their current counters. Traffic that happened before enrollment is not multiplied.
+
+Compatible active single-user rules are consolidated into the persistent scope. Existing baselines and remainders are preserved, and the old single-user rules become merged metadata that cleanup can prune later.
 
 Apply a factor only to clients with a configured traffic limit:
 

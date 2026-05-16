@@ -2,6 +2,19 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.2.1-beta - Unreleased
+
+### Fixed
+
+- Persistent `enable-all` now consolidates compatible active single-user rules into matching scopes.
+- Existing rule-client baselines and remainders are preserved during consolidation.
+- Compatible merged rules are no longer active effective rules and can be pruned by cleanup retention.
+
+### Safety
+
+- Consolidation never modifies 3x-ui counters and avoids duplicate active targets for the same traffic row.
+- Incompatible, disabled, unlimited, or mismatched clients are skipped and audited instead of being adopted.
+
 ## v0.2.0-beta - Unreleased
 
 ### Added

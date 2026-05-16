@@ -151,6 +151,15 @@ func (tx *Tx) SetRuleDisabled(ctx context.Context, id, now int64) error {
 	return err
 }
 
+func (tx *Tx) SetRuleMerged(ctx context.Context, id, now int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_rules
+		SET state=?, updated_at=?, disabled_at=?
+		WHERE id=?
+	`, StateMerged, now, now, id)
+	return err
+}
+
 func (tx *Tx) SetRulePaused(ctx context.Context, id, now int64) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE xui_factor_rules

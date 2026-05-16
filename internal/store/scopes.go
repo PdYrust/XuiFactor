@@ -18,6 +18,66 @@ func (tx *Tx) CreateScope(ctx context.Context, scope Scope) error {
 	return err
 }
 
+func (tx *Tx) FindActivePersistentScope(ctx context.Context, factorPPM int64, inboundID *int64, limitedOnly, includeDisabledClients bool) (Scope, error) {
+	query := `
+		SELECT
+			s.rule_id, s.inbound_id, s.limited_only, s.include_disabled_clients, s.once, s.created_at, s.updated_at,
+			r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
+			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at
+		FROM xui_factor_scopes s
+		INNER JOIN xui_factor_rules r ON r.id = s.rule_id
+		WHERE r.state = ?
+			AND r.factor_ppm = ?
+			AND s.once = 0
+			AND s.limited_only = ?
+			AND s.include_disabled_clients = ?`
+	args := []any{StateActive, factorPPM, boolInt(limitedOnly), boolInt(includeDisabledClients)}
+	if inboundID == nil {
+		query += " AND s.inbound_id IS NULL"
+	} else {
+		query += " AND s.inbound_id = ?"
+		args = append(args, *inboundID)
+	}
+	query += " ORDER BY s.rule_id LIMIT 1"
+
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return Scope{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return Scope{}, err
+		}
+		return Scope{}, ErrNotFound
+	}
+	scope, err := scanScopeRuleRows(rows)
+	if err != nil {
+		return Scope{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return Scope{}, err
+	}
+	return scope, nil
+}
+
+func (tx *Tx) RuleHasScope(ctx context.Context, ruleID int64) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1
+		FROM xui_factor_scopes
+		WHERE rule_id = ?
+		LIMIT 1
+	`, ruleID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (tx *Tx) RuleClientExists(ctx context.Context, ruleID, trafficID int64) (bool, error) {
 	var exists int
 	err := tx.QueryRowContext(ctx, `
@@ -35,12 +95,65 @@ func (tx *Tx) RuleClientExists(ctx context.Context, ruleID, trafficID int64) (bo
 	return true, nil
 }
 
+func (tx *Tx) RuleClient(ctx context.Context, ruleID, trafficID int64) (RuleClient, error) {
+	row := tx.QueryRowContext(ctx, `
+		SELECT rule_id, traffic_id, inbound_id, email,
+			last_up, last_down, last_all_time,
+			rem_up, rem_down, rem_all_time, missing_since, updated_at
+		FROM xui_factor_rule_clients
+		WHERE rule_id = ? AND traffic_id = ?
+	`, ruleID, trafficID)
+	return scanRuleClient(row)
+}
+
+func (tx *Tx) RuleClientCount(ctx context.Context, ruleID int64) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM xui_factor_rule_clients
+		WHERE rule_id = ?
+	`, ruleID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (tx *Tx) CopyRuleClient(ctx context.Context, fromRuleID, toRuleID, trafficID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO xui_factor_rule_clients(
+			rule_id, traffic_id, inbound_id, email,
+			last_up, last_down, last_all_time,
+			rem_up, rem_down, rem_all_time, missing_since, updated_at
+		)
+		SELECT ?, traffic_id, inbound_id, email,
+			last_up, last_down, last_all_time,
+			rem_up, rem_down, rem_all_time, missing_since, updated_at
+		FROM xui_factor_rule_clients
+		WHERE rule_id = ? AND traffic_id = ?
+	`, toRuleID, fromRuleID, trafficID)
+	return err
+}
+
 func (tx *Tx) ActiveRuleForTrafficExcept(ctx context.Context, trafficID, exceptRuleID int64) (Rule, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
 			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at
 		FROM xui_factor_rules r
 		INNER JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
+		WHERE rc.traffic_id = ? AND r.state = ? AND r.id <> ?
+		ORDER BY r.id
+		LIMIT 1
+	`, trafficID, StateActive, exceptRuleID)
+	return scanRule(row)
+}
+
+func (tx *Tx) ActiveScopeForTrafficExcept(ctx context.Context, trafficID, exceptRuleID int64) (Rule, error) {
+	row := tx.QueryRowContext(ctx, `
+		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
+			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at
+		FROM xui_factor_rules r
+		INNER JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
+		INNER JOIN xui_factor_scopes s ON s.rule_id = r.id
 		WHERE rc.traffic_id = ? AND r.state = ? AND r.id <> ?
 		ORDER BY r.id
 		LIMIT 1
@@ -197,6 +310,33 @@ func scanRuleRowsWithScope(rows *sql.Rows) (Rule, error) {
 	rule.DisabledAt = nullablePtr(disabledAt)
 	attachScope(&rule, scopeRuleID, scopeInboundID, limitedOnly, includeDisabledClients, once, scopeCreatedAt, scopeUpdatedAt)
 	return rule, nil
+}
+
+func scanRuleClient(row *sql.Row) (RuleClient, error) {
+	var rc RuleClient
+	var missingSince sql.NullInt64
+	err := row.Scan(
+		&rc.RuleID,
+		&rc.TrafficID,
+		&rc.InboundID,
+		&rc.Email,
+		&rc.LastUp,
+		&rc.LastDown,
+		&rc.LastAllTime,
+		&rc.RemUp,
+		&rc.RemDown,
+		&rc.RemAllTime,
+		&missingSince,
+		&rc.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RuleClient{}, ErrNotFound
+	}
+	if err != nil {
+		return RuleClient{}, err
+	}
+	rc.MissingAt = nullablePtr(missingSince)
+	return rc, nil
 }
 
 func scanRuleRowsWithCountAndScope(rows *sql.Rows) (Rule, error) {
