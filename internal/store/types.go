@@ -9,21 +9,23 @@ const (
 	StateMerged   = "merged"
 	StateOrphaned = "orphaned"
 
-	EventRuleEnabled   = "rule_enabled"
-	EventRuleDisabled  = "rule_disabled"
-	EventRulePaused    = "rule_paused"
-	EventRuleResumed   = "rule_resumed"
-	EventRuleMerged    = "rule_consolidated"
-	EventRuleReconcile = "rule_reconciled"
-	EventClientAdopted = "client_adopted_into_scope"
-	EventRuleSkip      = "rule_skipped_not_compatible"
-	EventTrafficApply  = "traffic_applied"
-	EventClientReset   = "client_rebaseline"
-	EventClientMissing = "client_missing"
-	EventClientPruned  = "client_tracking_pruned"
-	EventScopeEnroll   = "scope_auto_enroll"
-	EventScopeSkip     = "scope_auto_enroll_skipped"
-	EventCleanup       = "cleanup"
+	EventRuleEnabled    = "rule_enabled"
+	EventRuleDisabled   = "rule_disabled"
+	EventRulePaused     = "rule_paused"
+	EventRuleResumed    = "rule_resumed"
+	EventRuleMerged     = "rule_consolidated"
+	EventRuleReconcile  = "rule_reconciled"
+	EventClientAdopted  = "client_adopted_into_scope"
+	EventRuleSkip       = "rule_skipped_not_compatible"
+	EventTrafficApply   = "traffic_applied"
+	EventClientReset    = "client_rebaseline"
+	EventClientMissing  = "client_missing"
+	EventClientPruned   = "client_tracking_pruned"
+	EventScopeEnroll    = "scope_auto_enroll"
+	EventScopeSkip      = "scope_auto_enroll_skipped"
+	EventCleanup        = "cleanup"
+	EventExcludeEnable  = "exclude_enabled"
+	EventExcludeDisable = "exclude_disabled"
 )
 
 var (
@@ -46,19 +48,20 @@ type ClientTraffic struct {
 }
 
 type Rule struct {
-	ID          int64
-	Name        string
-	InboundID   int64
-	Email       string
-	FactorPPM   int64
-	State       string
-	CreatedAt   int64
-	UpdatedAt   int64
-	ActivatedAt *int64
-	PausedAt    *int64
-	DisabledAt  *int64
-	ClientCount int64
-	Scope       *Scope
+	ID                   int64
+	Name                 string
+	InboundID            int64
+	Email                string
+	FactorPPM            int64
+	State                string
+	CreatedAt            int64
+	UpdatedAt            int64
+	ActivatedAt          *int64
+	PausedAt             *int64
+	DisabledAt           *int64
+	ClientCount          int64
+	EffectiveClientCount int64
+	Scope                *Scope
 }
 
 type Scope struct {
@@ -92,6 +95,24 @@ type ActiveRuleClient struct {
 	Client RuleClient
 }
 
+type ExcludePolicy struct {
+	ID          int64
+	TrafficID   int64
+	InboundID   int64
+	Email       string
+	State       string
+	Note        string
+	CreatedAt   int64
+	UpdatedAt   int64
+	ActivatedAt *int64
+	DisabledAt  *int64
+}
+
+type ExcludeCounts struct {
+	Active   int
+	Inactive int
+}
+
 type Event struct {
 	ID        int64
 	RuleID    *int64
@@ -121,11 +142,12 @@ type CleanupOptions struct {
 }
 
 type CleanupResult struct {
-	MissingClientsMarked int
-	MissingClientsPruned int
-	DisabledRulesPruned  int
-	DisabledScopesPruned int
-	AuditEventsPruned    int
-	VacuumRun            bool
-	DryRun               bool
+	MissingClientsMarked   int
+	MissingClientsPruned   int
+	DisabledRulesPruned    int
+	DisabledScopesPruned   int
+	InactiveExcludesPruned int
+	AuditEventsPruned      int
+	VacuumRun              bool
+	DryRun                 bool
 }

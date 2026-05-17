@@ -70,6 +70,37 @@ func TestFutureExcludeAndOverridePrecedenceCanBeRepresented(t *testing.T) {
 	}
 }
 
+func TestExcludePolicyCandidatesHaveHighestPrecedence(t *testing.T) {
+	target := candidate(1, 10, SourceInboundScope, 2_000_000)
+	decisions, err := Decide(append([]Candidate{target}, ExcludeCandidatesForActiveTargets([]store.ExcludePolicy{
+		{ID: 99, TrafficID: 1, InboundID: 1, Email: "user@example.com", State: store.StateActive},
+	}, []store.ActiveRuleClient{*target.Target})...))
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %d, want 1", len(decisions))
+	}
+	decision := decisions[0]
+	if decision.SourceType != SourceExclude || decision.SourceRuleID != 99 || decision.Target != nil {
+		t.Fatalf("decision = %#v, want exclude policy", decision)
+	}
+	if len(decision.Suppressed) != 1 {
+		t.Fatalf("suppressed = %d, want one rule target", len(decision.Suppressed))
+	}
+}
+
+func TestExcludePolicyUsesFullClientIdentity(t *testing.T) {
+	target := candidate(1, 10, SourceInboundScope, 2_000_000)
+	candidates := ExcludeCandidatesForActiveTargets([]store.ExcludePolicy{
+		{ID: 99, TrafficID: 1, InboundID: 1, Email: "other@example.com", State: store.StateActive},
+		{ID: 100, TrafficID: 2, InboundID: 1, Email: "user@example.com", State: store.StateActive},
+	}, []store.ActiveRuleClient{*target.Target})
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want no identity mismatch candidates", candidates)
+	}
+}
+
 func TestAmbiguousSamePrecedenceTargetsFailSafely(t *testing.T) {
 	_, err := Decide([]Candidate{
 		candidate(1, 10, SourceInboundScope, 2_000_000),

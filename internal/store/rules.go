@@ -207,11 +207,12 @@ func (tx *Tx) AddEvent(ctx context.Context, ruleID *int64, eventType, message st
 }
 
 func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, error) {
-	query := `
-		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
-			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at,
-			COALESCE(SUM(CASE
-				WHEN rc.missing_since IS NULL
+	excludesReady, err := s.tableExists(ctx, "xui_factor_excludes")
+	if err != nil {
+		return nil, err
+	}
+	baseValidity := `
+				rc.missing_since IS NULL
 					AND ct.id IS NOT NULL
 					AND (
 						(s.rule_id IS NULL AND ct.enable = 1)
@@ -228,8 +229,27 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 								AND scope_r.state = ?
 								AND scope_r.id <> r.id
 						)
-					)
-				THEN 1 ELSE 0 END), 0) AS client_count,
+					)`
+	effectiveValidity := baseValidity
+	args := []any{StateActive, StateActive}
+	if excludesReady {
+		effectiveValidity += `
+					AND NOT EXISTS (
+						SELECT 1
+						FROM xui_factor_excludes ex
+						WHERE ex.traffic_id = rc.traffic_id
+							AND ex.inbound_id = rc.inbound_id
+							AND ex.email = rc.email
+							AND ex.state = ?
+					)`
+		args = append(args, StateActive)
+	}
+
+	query := `
+		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
+			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at,
+			COALESCE(SUM(CASE WHEN ` + baseValidity + ` THEN 1 ELSE 0 END), 0) AS client_count,
+			COALESCE(SUM(CASE WHEN ` + effectiveValidity + ` THEN 1 ELSE 0 END), 0) AS effective_client_count,
 			s.rule_id, s.inbound_id, s.limited_only, s.include_disabled_clients, s.once, s.created_at, s.updated_at
 		FROM xui_factor_rules r
 		LEFT JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
@@ -242,15 +262,10 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 		query += " GROUP BY r.id ORDER BY r.id"
 	} else {
 		query += " WHERE r.state IN (?, ?) GROUP BY r.id ORDER BY r.id"
+		args = append(args, StateActive, StatePaused)
 	}
 
-	var rows *sql.Rows
-	var err error
-	if includeDisabled {
-		rows, err = s.db.QueryContext(ctx, query, StateActive)
-	} else {
-		rows, err = s.db.QueryContext(ctx, query, StateActive, StateActive, StatePaused)
-	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +277,7 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 		if err != nil {
 			return nil, err
 		}
-		if !includeDisabled && rule.Scope == nil && rule.ClientCount == 0 {
+		if !includeDisabled && rule.Scope == nil && rule.EffectiveClientCount == 0 {
 			continue
 		}
 		rules = append(rules, rule)

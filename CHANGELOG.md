@@ -2,6 +2,26 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.3.1-beta - Unreleased
+
+### Added
+
+- `exclude`, `unexclude`, and `excludes` commands for client exception policies.
+- Dedicated `xui_factor_excludes` metadata table using traffic id, inbound id, and email identity.
+- Status and doctor policy counts for active exclude policies.
+- v0.3.1-beta release notes.
+
+### Changed
+
+- Effective policy decisions now include active excludes as the highest-precedence no-factor decision.
+- Status shows effective client counts when excludes suppress materialized scope clients.
+
+### Safety
+
+- Excluded clients do not receive factor updates, and suppressed baselines are refreshed from current counters.
+- Removing an exclude does not retroactively factor traffic that arrived while the exclude was active.
+- Cleanup can prune inactive exclude metadata after retention and never prunes active excludes.
+
 ## v0.3.0-beta - Unreleased
 
 ### Added

@@ -81,6 +81,91 @@ func TestEnableLifecycle(t *testing.T) {
 	}
 }
 
+func TestExcludeLifecycleUsesExactClientIdentity(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	policy, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &inboundID, Note: "maintenance"})
+	if err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	if policy.State != store.StateActive || policy.TrafficID != 1 || policy.InboundID != inboundID || policy.Email != "user@example.com" {
+		t.Fatalf("policy = %#v, want active exact identity", policy)
+	}
+
+	policies, err := svc.Excludes(ctx, ExcludeListRequest{})
+	if err != nil {
+		t.Fatalf("list excludes: %v", err)
+	}
+	if len(policies) != 1 || policies[0].Note != "maintenance" {
+		t.Fatalf("policies = %#v, want one active policy", policies)
+	}
+
+	disabled, err := svc.Unexclude(ctx, ExcludeSelector{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("unexclude: %v", err)
+	}
+	if disabled.State != store.StateDisabled {
+		t.Fatalf("state = %s, want disabled", disabled.State)
+	}
+	policies, err = svc.Excludes(ctx, ExcludeListRequest{IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("list all excludes: %v", err)
+	}
+	if len(policies) != 1 || policies[0].State != store.StateDisabled {
+		t.Fatalf("policies = %#v, want one inactive policy", policies)
+	}
+
+	db := openTestDB(t, dbPath)
+	defer db.Close()
+	if got := countEngineEvents(t, db, store.EventExcludeEnable); got != 1 {
+		t.Fatalf("exclude enable events = %d, want 1", got)
+	}
+	if got := countEngineEvents(t, db, store.EventExcludeDisable); got != 1 {
+		t.Fatalf("exclude disable events = %d, want 1", got)
+	}
+}
+
+func TestExcludeSameEmailDifferentTrafficIsDifferentClient(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	first, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("first exclude: %v", err)
+	}
+	db := openTestDB(t, dbPath)
+	execEngineTestSQL(t, db, `DELETE FROM client_traffics WHERE id=1`)
+	execEngineTestSQL(t, db, `
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
+		VALUES(2, ?, 1, 'user@example.com', 500, 600, 1100, 0, 0, 0, 0)
+	`, inboundID)
+	db.Close()
+
+	second, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("second exclude: %v", err)
+	}
+	if first.ID == second.ID || first.TrafficID == second.TrafficID {
+		t.Fatalf("first=%#v second=%#v, want separate policies", first, second)
+	}
+	policies, err := svc.Excludes(ctx, ExcludeListRequest{})
+	if err != nil {
+		t.Fatalf("list excludes: %v", err)
+	}
+	if len(policies) != 2 {
+		t.Fatalf("policies = %#v, want two active policies", policies)
+	}
+}
+
 func TestDisableKeepsTrafficCounters(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newTestService(t, []testTraffic{
@@ -257,4 +342,13 @@ func execEngineTestSQL(t *testing.T, db *sql.DB, query string, args ...any) {
 	if _, err := db.Exec(query, args...); err != nil {
 		t.Fatalf("exec SQL: %v", err)
 	}
+}
+
+func countEngineEvents(t *testing.T, db *sql.DB, eventType string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_events WHERE event_type=?`, eventType).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	return count
 }

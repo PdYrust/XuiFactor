@@ -236,6 +236,66 @@ func TestCleanupDoesNotPruneActiveOrPausedScopes(t *testing.T) {
 	}
 }
 
+func TestCleanupDoesNotPruneActiveExcludes(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
+	defer st.Close()
+
+	if _, err := svc.Exclude(ctx, ExcludeRequest{Email: "a@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	setCleanupExcludeUpdatedAt(t, dbPath, 1_699_000_000)
+
+	result, err := svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig()})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.InactiveExcludesPruned != 0 {
+		t.Fatalf("inactive excludes pruned = %d, want 0", result.InactiveExcludesPruned)
+	}
+	if got := countCleanupExcludes(t, dbPath); got != 1 {
+		t.Fatalf("excludes = %d, want 1", got)
+	}
+}
+
+func TestCleanupPrunesInactiveExcludesAfterRetention(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
+	defer st.Close()
+
+	if _, err := svc.Exclude(ctx, ExcludeRequest{Email: "a@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	if _, err := svc.Unexclude(ctx, ExcludeSelector{Email: "a@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("unexclude: %v", err)
+	}
+	setCleanupExcludeDisabledAt(t, dbPath, 1_699_000_000)
+
+	result, err := svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig(), DryRun: true})
+	if err != nil {
+		t.Fatalf("cleanup dry-run: %v", err)
+	}
+	if result.InactiveExcludesPruned != 1 {
+		t.Fatalf("dry-run inactive excludes pruned = %d, want 1", result.InactiveExcludesPruned)
+	}
+	if got := countCleanupExcludes(t, dbPath); got != 1 {
+		t.Fatalf("dry-run excludes = %d, want 1", got)
+	}
+
+	result, err = svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig()})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.InactiveExcludesPruned != 1 {
+		t.Fatalf("inactive excludes pruned = %d, want 1", result.InactiveExcludesPruned)
+	}
+	if got := countCleanupExcludes(t, dbPath); got != 0 {
+		t.Fatalf("excludes = %d, want 0", got)
+	}
+}
+
 func TestCleanupPrunesOldAuditEventsAfterRetention(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
@@ -361,6 +421,20 @@ func setAllCleanupRulesOld(t *testing.T, dbPath string) {
 	execBulkSQL(t, db, `UPDATE xui_factor_rules SET disabled_at=1699000000, updated_at=1699000000`)
 }
 
+func setCleanupExcludeUpdatedAt(t *testing.T, dbPath string, updatedAt int64) {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	execBulkSQL(t, db, `UPDATE xui_factor_excludes SET updated_at=?`, updatedAt)
+}
+
+func setCleanupExcludeDisabledAt(t *testing.T, dbPath string, disabledAt int64) {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	execBulkSQL(t, db, `UPDATE xui_factor_excludes SET disabled_at=?, updated_at=?`, disabledAt, disabledAt)
+}
+
 func insertCleanupEvent(t *testing.T, dbPath string, ruleID *int64, eventType, message string, createdAt int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
@@ -405,6 +479,13 @@ func countCleanupScopes(t *testing.T, dbPath string) int {
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	return countCleanupRows(t, db, `SELECT COUNT(*) FROM xui_factor_scopes`)
+}
+
+func countCleanupExcludes(t *testing.T, dbPath string) int {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	return countCleanupRows(t, db, `SELECT COUNT(*) FROM xui_factor_excludes`)
 }
 
 func countCleanupEvents(t *testing.T, dbPath, eventType string) int {
