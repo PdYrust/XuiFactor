@@ -12,6 +12,8 @@ BACKUP_DIR=${BACKUP_DIR:-/var/backups/xui-factor}
 SERVICE_NAME=${SERVICE_NAME:-xui-factor.service}
 SYSTEMD_DIR=${SYSTEMD_DIR:-/etc/systemd/system}
 SERVICE_FILE=${SERVICE_FILE:-$SYSTEMD_DIR/$SERVICE_NAME}
+SYSTEMCTL=${SYSTEMCTL:-systemctl}
+JOURNALCTL=${JOURNALCTL:-journalctl}
 DESTDIR=${DESTDIR:-}
 
 die() {
@@ -21,6 +23,10 @@ die() {
 
 info() {
 	printf '%s\n' "info: $*"
+}
+
+warn() {
+	printf '%s\n' "warning: $*" >&2
 }
 
 require_root() {
@@ -138,11 +144,19 @@ install_default_config() {
 	info "created default config at $CONFIG_FILE"
 }
 
-systemd_available() {
+has_systemd() {
+	if [ "${XUI_FACTOR_TEST_SYSTEMD:-0}" = "1" ]; then
+		command -v "$SYSTEMCTL" >/dev/null 2>&1
+		return
+	fi
 	if staged_mode; then
 		return 1
 	fi
-	command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
+	command -v "$SYSTEMCTL" >/dev/null 2>&1 && [ -d /run/systemd/system ]
+}
+
+systemd_available() {
+	has_systemd
 }
 
 render_service_file() {
@@ -167,54 +181,116 @@ EOF
 install_systemd_service() {
 	SERVICE_CHANGED=0
 	service_file=$(stage_path "$SERVICE_FILE")
-	if staged_mode; then
-		mkdir -p "$(dirname "$service_file")"
-		tmp="$service_file.$$"
-		if ! render_service_file > "$tmp"; then
-			rm -f "$tmp"
-			die "service file install path is not writable: $(dirname "$service_file")"
-		fi
-		mv -f "$tmp" "$service_file"
-		info "installed staged systemd service at $service_file"
-		return
-	fi
-	if ! systemd_available; then
-		info "systemd is not available; skipped service installation"
-		return
-	fi
-	mkdir -p "$SYSTEMD_DIR"
+	mkdir -p "$(dirname "$service_file")"
 	tmp="$service_file.$$"
 	if ! render_service_file > "$tmp"; then
 		rm -f "$tmp"
-		die "service file install path is not writable: $SYSTEMD_DIR"
+		die "service file install path is not writable: $(dirname "$service_file")"
 	fi
 	if [ -f "$service_file" ] && cmp -s "$tmp" "$service_file"; then
 		rm -f "$tmp"
 	else
 		mv -f "$tmp" "$service_file"
 		SERVICE_CHANGED=1
-		info "installed systemd service at $SERVICE_FILE"
-	fi
-	if [ "$SERVICE_CHANGED" -eq 1 ]; then
-		systemctl daemon-reload
+		if staged_mode; then
+			info "installed staged systemd service at $service_file"
+		else
+			info "installed systemd service at $SERVICE_FILE"
+		fi
 	fi
 }
 
+systemd_daemon_reload() {
+	if ! has_systemd; then
+		return 0
+	fi
+	"$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || die "failed to reload systemd"
+}
+
+systemd_enable_service() {
+	"$SYSTEMCTL" enable "$SERVICE_NAME" >/dev/null 2>&1 || die "failed to enable $SERVICE_NAME"
+	info "enabled $SERVICE_NAME"
+}
+
+systemd_start_service() {
+	"$SYSTEMCTL" start "$SERVICE_NAME" >/dev/null 2>&1
+}
+
+systemd_restart_service() {
+	"$SYSTEMCTL" restart "$SERVICE_NAME" >/dev/null 2>&1
+}
+
+systemd_assert_active() {
+	"$SYSTEMCTL" is-active --quiet "$SERVICE_NAME" >/dev/null 2>&1
+}
+
+systemd_failure_diagnostics() {
+	action=$1
+	printf '%s\n' "error: failed to $action $SERVICE_NAME" >&2
+	printf '%s\n' "diagnostic: systemctl status $SERVICE_NAME --no-pager" >&2
+	printf '%s\n' "diagnostic: journalctl -u $SERVICE_NAME -n 80 --no-pager" >&2
+}
+
+activate_systemd_service() {
+	no_enable=$1
+	no_start=$2
+	action=$3
+
+	if staged_mode && [ "${XUI_FACTOR_TEST_SYSTEMD:-0}" != "1" ]; then
+		info "staged install; skipped systemd service control"
+		return 0
+	fi
+	if ! has_systemd; then
+		warn "systemd is not available; $SERVICE_NAME was not enabled or started"
+		warn "run manually: $BIN_DIR/$BINARY_NAME --config $CONFIG_FILE run"
+		return 0
+	fi
+
+	systemd_daemon_reload
+	if [ "$no_enable" -eq 0 ]; then
+		systemd_enable_service
+	else
+		info "service enable skipped"
+	fi
+
+	if [ "$no_start" -ne 0 ]; then
+		info "service start skipped"
+		return 0
+	fi
+
+	if [ "$action" = "restart" ]; then
+		if ! systemd_restart_service; then
+			systemd_failure_diagnostics "restart"
+			return 1
+		fi
+	else
+		if ! systemd_start_service; then
+			systemd_failure_diagnostics "start"
+			return 1
+		fi
+	fi
+	if ! systemd_assert_active; then
+		systemd_failure_diagnostics "$action"
+		return 1
+	fi
+	info "$SERVICE_NAME is active"
+}
+
 service_is_active() {
-	systemd_available && systemctl is-active --quiet "$SERVICE_NAME"
+	has_systemd && "$SYSTEMCTL" is-active --quiet "$SERVICE_NAME"
 }
 
 stop_service_if_active() {
 	SERVICE_WAS_ACTIVE=0
 	if service_is_active; then
 		SERVICE_WAS_ACTIVE=1
-		systemctl stop "$SERVICE_NAME"
+		"$SYSTEMCTL" stop "$SERVICE_NAME"
 	fi
 }
 
 restart_service_if_was_active() {
-	if [ "${SERVICE_WAS_ACTIVE:-0}" -eq 1 ] && systemd_available; then
-		systemctl start "$SERVICE_NAME"
+	if [ "${SERVICE_WAS_ACTIVE:-0}" -eq 1 ] && has_systemd; then
+		"$SYSTEMCTL" start "$SERVICE_NAME"
 	fi
 }
 
@@ -222,9 +298,9 @@ disable_and_stop_service() {
 	if staged_mode; then
 		return
 	fi
-	if systemd_available; then
-		systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-		systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+	if has_systemd; then
+		"$SYSTEMCTL" stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+		"$SYSTEMCTL" disable "$SERVICE_NAME" >/dev/null 2>&1 || true
 	fi
 }
 
@@ -232,8 +308,8 @@ remove_systemd_service() {
 	service_file=$(stage_path "$SERVICE_FILE")
 	if [ -f "$service_file" ]; then
 		rm -f "$service_file"
-		if ! staged_mode && systemd_available; then
-			systemctl daemon-reload
+		if ! staged_mode && has_systemd; then
+			"$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || true
 		fi
 		info "removed $SERVICE_FILE"
 	fi
@@ -303,8 +379,8 @@ print_next_steps() {
 		info "staged root: $DESTDIR"
 		return
 	fi
-	if systemd_available; then
-		info "enable service: systemctl enable --now $SERVICE_NAME"
+	if has_systemd; then
+		info "check service: systemctl status $SERVICE_NAME --no-pager"
 	else
 		info "run manually: $BIN_DIR/$BINARY_NAME --config $CONFIG_FILE run"
 	fi

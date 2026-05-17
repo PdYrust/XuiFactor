@@ -196,6 +196,7 @@ verify-installers:
 		test ! -e "$$root/etc/xui-factor"; \
 		test ! -e "$$root/usr/local/share/$(APP)"; \
 		test -f "$$root/etc/x-ui/x-ui.db"; \
+		sh scripts/test-installers.sh "$$pkg" "$$tmp_dir/installer-tests"; \
 		rm -rf "$$tmp_dir"; \
 		trap - EXIT HUP INT TERM; \
 	done

@@ -40,3 +40,14 @@ func (s *Store) CountRules(ctx context.Context) (RuleCounts, error) {
 	}
 	return counts, nil
 }
+
+func (s *Store) CountActivePersistentScopes(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM xui_factor_scopes s
+		INNER JOIN xui_factor_rules r ON r.id = s.rule_id
+		WHERE s.once = 0 AND r.state = ?
+	`, StateActive).Scan(&count)
+	return count, err
+}

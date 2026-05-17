@@ -2,6 +2,27 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.2.3-beta - Unreleased
+
+### Added
+
+- Install and update now enable and start `xui-factor.service` by default on systemd hosts.
+- `install.sh` supports `--no-enable` and `--no-start`.
+- `update.sh` supports `--no-enable`, `--no-start`, and `--no-restart`.
+- Doctor now reports service installed, enabled, and active states separately.
+- v0.2.3-beta release notes.
+
+### Fixed
+
+- Update starts the service even when it was previously disabled or inactive, unless explicitly skipped.
+- Install and update print service failure diagnostics with `systemctl status` and `journalctl` commands.
+- Doctor warns when active rules or persistent scopes require the service but it is not running.
+
+### Safety
+
+- DESTDIR installer runs do not control host systemd unless an explicit test mock is enabled.
+- Service lifecycle changes do not touch 3x-ui counters or `/etc/x-ui/x-ui.db`.
+
 ## v0.2.2-beta - Unreleased
 
 ### Added
