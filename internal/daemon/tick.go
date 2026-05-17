@@ -11,6 +11,7 @@ import (
 
 	"github.com/PdYrust/XuiFactor/internal/config"
 	"github.com/PdYrust/XuiFactor/internal/engine"
+	"github.com/PdYrust/XuiFactor/internal/policy"
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
@@ -98,13 +99,25 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 		if err != nil {
 			return err
 		}
-		result.ActiveClients = len(targets)
-		if err := rejectDuplicateTargets(targets); err != nil {
+		decisions, err := policy.DecideActiveRuleClients(targets)
+		if err != nil {
+			if errors.Is(err, policy.ErrAmbiguousEffectiveTarget) {
+				return store.ConflictError("%v", err)
+			}
 			return err
 		}
+		result.ActiveClients = len(decisions)
 
-		for _, target := range targets {
-			step, err := r.tickTarget(ctx, tx, target, now)
+		for _, decision := range decisions {
+			if decision.Target == nil {
+				for _, suppressed := range decision.Suppressed {
+					if err := r.refreshSuppressedBaseline(ctx, tx, suppressed, now); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			step, err := r.tickTarget(ctx, tx, *decision.Target, now)
 			if err != nil {
 				return err
 			}
@@ -112,6 +125,11 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 			result.Baselined += step.Baselined
 			result.Rebaselined += step.Rebaselined
 			result.Missing += step.Missing
+			for _, suppressed := range decision.Suppressed {
+				if err := r.refreshSuppressedBaseline(ctx, tx, suppressed, now); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
@@ -120,6 +138,22 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 	}
 	r.runAutoCleanup(ctx, now)
 	return result, nil
+}
+
+func (r *Runner) refreshSuppressedBaseline(ctx context.Context, tx *store.Tx, target store.ActiveRuleClient, now int64) error {
+	current, err := tx.ClientTrafficByID(ctx, target.Client.TrafficID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			_, markErr := r.markMissing(ctx, tx, target, now)
+			return markErr
+		}
+		return err
+	}
+	if current.InboundID != target.Client.InboundID || current.Email != target.Client.Email {
+		_, markErr := r.markMissing(ctx, tx, target, now)
+		return markErr
+	}
+	return tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, 0, now))
 }
 
 func (r *Runner) runAutoCleanup(ctx context.Context, now int64) {

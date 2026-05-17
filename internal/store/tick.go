@@ -12,11 +12,13 @@ func (tx *Tx) ListActiveRuleClients(ctx context.Context) ([]ActiveRuleClient, er
 		SELECT
 			r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
 			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at,
+			s.rule_id, s.inbound_id, s.limited_only, s.include_disabled_clients, s.once, s.created_at, s.updated_at,
 			rc.rule_id, rc.traffic_id, rc.inbound_id, rc.email,
 			rc.last_up, rc.last_down, rc.last_all_time,
 			rc.rem_up, rc.rem_down, rc.rem_all_time, rc.missing_since, rc.updated_at
 		FROM xui_factor_rules r
 		INNER JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
+		LEFT JOIN xui_factor_scopes s ON s.rule_id = r.id
 		WHERE r.state = ?
 		ORDER BY r.id, rc.traffic_id
 	`, StateActive)
@@ -29,6 +31,8 @@ func (tx *Tx) ListActiveRuleClients(ctx context.Context) ([]ActiveRuleClient, er
 	for rows.Next() {
 		var target ActiveRuleClient
 		var activatedAt, pausedAt, disabledAt, missingSince sql.NullInt64
+		var scopeRuleID, scopeInboundID, scopeCreatedAt, scopeUpdatedAt sql.NullInt64
+		var limitedOnly, includeDisabledClients, once sql.NullInt64
 		if err := rows.Scan(
 			&target.Rule.ID,
 			&target.Rule.Name,
@@ -41,6 +45,13 @@ func (tx *Tx) ListActiveRuleClients(ctx context.Context) ([]ActiveRuleClient, er
 			&activatedAt,
 			&pausedAt,
 			&disabledAt,
+			&scopeRuleID,
+			&scopeInboundID,
+			&limitedOnly,
+			&includeDisabledClients,
+			&once,
+			&scopeCreatedAt,
+			&scopeUpdatedAt,
 			&target.Client.RuleID,
 			&target.Client.TrafficID,
 			&target.Client.InboundID,
@@ -59,6 +70,7 @@ func (tx *Tx) ListActiveRuleClients(ctx context.Context) ([]ActiveRuleClient, er
 		target.Rule.ActivatedAt = nullablePtr(activatedAt)
 		target.Rule.PausedAt = nullablePtr(pausedAt)
 		target.Rule.DisabledAt = nullablePtr(disabledAt)
+		attachScope(&target.Rule, scopeRuleID, scopeInboundID, limitedOnly, includeDisabledClients, once, scopeCreatedAt, scopeUpdatedAt)
 		target.Client.MissingAt = nullablePtr(missingSince)
 		targets = append(targets, target)
 	}

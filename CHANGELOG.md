@@ -2,6 +2,25 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.3.0-beta - Unreleased
+
+### Added
+
+- Internal policy decision foundation for one effective factor decision per client.
+- Deterministic precedence for overlapping policy sources: exclude, user override, inbound scope, then global scope.
+- Shared CLI output layer for concise sectioned summaries across operational commands.
+- v0.3.0-beta release notes.
+
+### Changed
+
+- `status`, `doctor`, lifecycle, bulk, tick, cleanup, reconcile, and backup output now use a cleaner operator-facing format.
+- Tick processing now evaluates effective rule ownership before applying deltas, keeping overlapping active metadata from double-applying factors.
+
+### Safety
+
+- Existing persistent scopes, single-user rules, reconciliation, cleanup, and snapshot mode remain compatible.
+- Suppressed lower-priority active targets refresh baselines from current counters instead of accumulating retroactive deltas.
+
 ## v0.2.3-beta - Unreleased
 
 ### Added

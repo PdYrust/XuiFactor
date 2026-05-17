@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.2.3-beta
+        description: Release tag, for example v0.3.0-beta
         required: true
         type: string
       title:
-        description: Release title, for example XuiFactor v0.2.3-beta
+        description: Release title, for example XuiFactor v0.3.0-beta
         required: true
         type: string
       prerelease:
@@ -34,7 +34,7 @@ on:
       notes_file:
         description: Notes file path when notes_mode is file
         required: false
-        default: docs/releases/v0.2.3-beta.md
+        default: docs/releases/v0.3.0-beta.md
         type: string
       notes_body:
         description: Notes text when notes_mode is manual
@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
 
           if [[ ! "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must use a leading v, for example v0.2.3-beta" >&2
+            echo "Release tag must use a leading v, for example v0.3.0-beta" >&2
             exit 1
           fi
 

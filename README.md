@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.2.3-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.3-beta_linux_amd64
+tar -xzf xui-factor_v0.3.0-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.0-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -115,6 +115,10 @@ xui-factor disable-all
 `factor 1.2` means new traffic is counted as 120%. `factor 5` means new traffic is counted as 500%.
 
 Disabling a rule does not revert previously factored traffic. Traffic recorded after disabling is counted normally by 3x-ui.
+
+## Policy Behavior
+
+XuiFactor evaluates one effective decision per client before applying traffic deltas. More specific policy sources take precedence over broader scopes, so overlapping metadata does not double-apply factors. The v0.3 foundation uses this model internally for current single-user rules and persistent scopes, with room for future exclude and override policies.
 
 ## Metadata Cleanup
 

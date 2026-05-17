@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.2.3-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.3-beta_linux_amd64
+tar -xzf xui-factor_v0.3.0-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.0-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -119,7 +119,13 @@ Paused and disabled bulk scopes do not enroll new clients. Resuming a paused sco
 
 Test a single-user rule before using `enable-all` on a production server.
 
-## 9. Pause and resume
+## 9. Policy decisions
+
+Before each tick, XuiFactor resolves one effective factor decision per client. Current v0.3 behavior treats single-user rules as user-specific decisions, then applies inbound persistent scopes before global persistent scopes. The internal model also reserves higher precedence for future exclude and override policies.
+
+This keeps overlapping metadata from double-applying factors. Suppressed lower-priority targets keep their baselines fresh from current counters, so they do not apply old traffic retroactively if they later become effective.
+
+## 10. Pause and resume
 
 Pause one rule without changing counters:
 
@@ -142,7 +148,7 @@ xui-factor resume-all
 
 Traffic accumulated while a rule is paused is not factored when the rule resumes.
 
-## 10. Disable behavior
+## 11. Disable behavior
 
 Disable one rule:
 
@@ -158,7 +164,7 @@ xui-factor disable-all
 
 Disabling a rule does not subtract previously factored traffic. After disabling, future traffic is counted normally by 3x-ui.
 
-## 11. One-shot tick
+## 12. One-shot tick
 
 Run one factor tick manually:
 
@@ -168,7 +174,7 @@ xui-factor tick
 
 This is useful after enabling a rule, during maintenance checks, or before starting the daemon service.
 
-## 12. Daemon service operation
+## 13. Daemon service operation
 
 Install and update enable and start the service by default on systemd hosts. Check service state:
 
@@ -196,7 +202,7 @@ journalctl -u xui-factor.service -f
 
 The service runs `xui-factor` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
 
-## 13. Status and audit
+## 14. Status and audit
 
 List effective active and paused rules:
 
@@ -220,7 +226,7 @@ xui-factor audit --email User --inbound-id 1
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
 
-## 14. Reconcile legacy metadata
+## 15. Reconcile legacy metadata
 
 Reconcile older active single-user rules after upgrading or after manual database repair:
 
@@ -231,7 +237,7 @@ xui-factor reconcile
 
 Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible legacy rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned legacy rules are inactive and are pruned later by cleanup retention.
 
-## 15. Metadata cleanup
+## 16. Metadata cleanup
 
 The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id, inbound id, and email. Missing client tracking is pruned after the grace period.
 
@@ -259,7 +265,7 @@ Cleanup prunes only XuiFactor metadata. It never modifies 3x-ui counters and doe
 xui-factor cleanup --vacuum
 ```
 
-## 16. Update workflow
+## 17. Update workflow
 
 From a new release package, run:
 
@@ -269,7 +275,7 @@ sudo ./scripts/update.sh
 
 The update workflow preserves existing config, refreshes installed package files, enables `xui-factor.service`, and restarts it by default. Use `--no-start` or `--no-restart` to skip restart, and `--no-enable` to avoid enabling service startup.
 
-## 17. Uninstall workflow
+## 18. Uninstall workflow
 
 Remove the installed binary, service, and shared package files while preserving config and backups:
 
@@ -285,7 +291,7 @@ sudo ./scripts/uninstall.sh --purge
 
 Uninstall and purge must not remove `/etc/x-ui/x-ui.db`.
 
-## 18. Recovery expectations
+## 19. Recovery expectations
 
 XuiFactor does not automatically restore backups. To recover from a selected backup:
 
@@ -299,7 +305,7 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 
 Keep backup files until the recovered server has been verified.
 
-## 19. Safety checklist
+## 20. Safety checklist
 
 - Run `xui-factor doctor` first.
 - Run `xui-factor backup` before broad changes.

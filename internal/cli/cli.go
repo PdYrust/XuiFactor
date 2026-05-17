@@ -154,23 +154,27 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 		return 1
 	}
 
-	fmt.Fprintf(a.Out, "%s doctor\n", displayName)
-	fmt.Fprintf(a.Out, "version: %s\n", a.Info.Version)
-	fmt.Fprintf(a.Out, "commit: %s\n", a.Info.Commit)
-	fmt.Fprintf(a.Out, "built: %s\n", a.Info.BuildTime)
-	fmt.Fprintf(a.Out, "config: %s\n", effectiveConfigPath(opts))
-	fmt.Fprintf(a.Out, "database: %s\n", cfg.DatabasePath)
+	out := newOutput(a.Out)
+	warnings := make([]string, 0, 4)
+	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
+	out.Section("Doctor")
+	out.Field("config", effectiveConfigPath(opts))
+	out.Field("database", cfg.DatabasePath)
+	out.Field("commit", a.Info.Commit)
+	out.Field("built", a.Info.BuildTime)
 
 	dbAccess, err := checkDatabaseFile(cfg.DatabasePath)
 	if err != nil {
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintln(a.Out, "OK database read")
+	out.Section("Checks")
+	out.Field("database read", "ok")
 	if dbAccess.Writable {
-		fmt.Fprintln(a.Out, "OK database write")
+		out.Field("database write", "ok")
 	} else {
-		fmt.Fprintf(a.Out, "WARN database write unavailable: %v\n", dbAccess.WriteError)
+		out.Field("database write", "warning")
+		warnings = append(warnings, fmt.Sprintf("database write unavailable: %v", dbAccess.WriteError))
 	}
 
 	var st *store.Store
@@ -189,7 +193,7 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintln(a.Out, "OK schema")
+	out.Field("schema", "ok")
 	metadataReady := false
 	ready, err := st.MetadataReady(ctx)
 	if err != nil {
@@ -198,21 +202,23 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 	}
 	metadataReady = ready
 	if ready {
-		fmt.Fprintln(a.Out, "OK metadata")
+		out.Field("metadata", "ok")
 	} else {
-		fmt.Fprintln(a.Out, "WARN metadata unavailable: metadata tables are missing")
+		out.Field("metadata", "warning")
+		warnings = append(warnings, "metadata unavailable: metadata tables are missing")
 	}
 
 	if err := validateBackupDir(cfg.BackupDir); err != nil {
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintf(a.Out, "OK backup dir %s\n", cfg.BackupDir)
+	out.Field("backup dir", cfg.BackupDir)
 
 	service := systemdServiceState()
-	fmt.Fprintf(a.Out, "service installed: %s\n", service.Installed)
-	fmt.Fprintf(a.Out, "service enabled: %s\n", service.Enabled)
-	fmt.Fprintf(a.Out, "service active: %s\n", service.Active)
+	out.Section("Service")
+	out.Field("installed", service.Installed)
+	out.Field("enabled", service.Enabled)
+	out.Field("active", service.Active)
 
 	if metadataReady {
 		counts, err := st.CountRules(ctx)
@@ -220,20 +226,30 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 			a.printError(err)
 			return 1
 		}
-		fmt.Fprintf(a.Out, "OK rules active=%d paused=%d disabled=%d\n", counts.Active, counts.Paused, counts.Disabled)
+		out.Section("Rules")
+		out.Field("active rules", counts.Active)
+		out.Field("paused rules", counts.Paused)
+		out.Field("disabled rules", counts.Disabled)
 		if (counts.Active > 0 || counts.Paused > 0) && (service.Active != "yes" || service.Enabled == "no") {
-			fmt.Fprintln(a.Out, "warning: active rules exist but xui-factor.service is not running")
+			warnings = append(warnings, "active rules exist but xui-factor.service is not running")
 		}
 		persistentScopes, err := st.CountActivePersistentScopes(ctx)
 		if err != nil {
 			a.printError(err)
 			return 1
 		}
+		out.Field("persistent scopes", persistentScopes)
 		if persistentScopes > 0 && service.Active != "yes" {
-			fmt.Fprintln(a.Out, "warning: persistent scopes exist but future client auto-enrollment requires xui-factor.service")
+			warnings = append(warnings, "persistent scopes exist but future client auto-enrollment requires xui-factor.service")
 		}
 	} else {
-		fmt.Fprintln(a.Out, "WARN rules unavailable: metadata tables are missing")
+		warnings = append(warnings, "rules unavailable: metadata tables are missing")
+	}
+	if len(warnings) > 0 {
+		out.Section("Warnings")
+		for _, warning := range warnings {
+			out.Field("warning", warning)
+		}
 	}
 	fmt.Fprintln(a.Out, "doctor: OK")
 	return 0
@@ -263,8 +279,13 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
+	out := newOutput(a.Out)
 	if !metadataReady {
-		fmt.Fprintln(a.Out, "status: no active or paused rules")
+		out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
+		out.Section("Status")
+		out.Field("active rules", 0)
+		out.Field("paused rules", 0)
+		out.Field("effective clients", 0)
 		return 0
 	}
 
@@ -273,21 +294,53 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
-	if len(rules) == 0 {
-		if includeDisabled {
-			fmt.Fprintln(a.Out, "status: no rules")
-		} else {
-			fmt.Fprintln(a.Out, "status: no active or paused rules")
-		}
-		return 0
-	}
-	if includeDisabled {
-		fmt.Fprintln(a.Out, "status: rules including inactive")
-	} else {
-		fmt.Fprintln(a.Out, "status: effective active and paused rules")
-	}
+	activeRules := 0
+	pausedRules := 0
+	effectiveClients := int64(0)
 	for _, rule := range rules {
-		printRule(a.Out, rule)
+		if rule.State == store.StateActive {
+			activeRules++
+			effectiveClients += rule.ClientCount
+		}
+		if rule.State == store.StatePaused {
+			pausedRules++
+		}
+	}
+
+	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
+	out.Section("Status")
+	out.Field("active rules", activeRules)
+	out.Field("paused rules", pausedRules)
+	out.Field("effective clients", effectiveClients)
+
+	scopes := make([]store.Rule, 0)
+	singles := make([]store.Rule, 0)
+	for _, rule := range rules {
+		if rule.Scope != nil {
+			scopes = append(scopes, rule)
+		} else {
+			singles = append(singles, rule)
+		}
+	}
+	if len(scopes) > 0 {
+		out.Section("Scopes")
+		for _, rule := range scopes {
+			out.Rule(rule)
+		}
+	}
+	if len(singles) > 0 {
+		out.Section("Rules")
+		for _, rule := range singles {
+			out.Rule(rule)
+		}
+	}
+	service := systemdServiceState()
+	out.Section("Service")
+	out.Field("enabled", service.Enabled)
+	out.Field("active", service.Active)
+	if includeDisabled && len(rules) == 0 {
+		out.Section("Rules")
+		out.Field("entries", 0)
 	}
 	return 0
 }
@@ -312,10 +365,20 @@ func (a *App) runEnable(ctx context.Context, opts commonOptions, args []string) 
 		Factor:    flags.factor,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status")
+			return commandErrorCode(err)
+		}
 		a.printError(err)
 		return commandErrorCode(err)
 	}
-	fmt.Fprintf(a.Out, "enable: active rule=%d email=%s inbound=%d factor=%s\n", rule.ID, rule.Email, rule.InboundID, engine.FormatFactor(rule.FactorPPM))
+	out := newOutput(a.Out)
+	out.Summary("enable", "rule active")
+	out.Section("Rule")
+	out.Field("rule", rule.ID)
+	out.Field("email", rule.Email)
+	out.Field("inbound", rule.InboundID)
+	out.Field("factor", engine.FormatFactor(rule.FactorPPM))
 	return 0
 }
 
@@ -344,7 +407,29 @@ func (a *App) runEnableAll(ctx context.Context, opts commonOptions, args []strin
 		a.printError(err)
 		return commandErrorCode(err)
 	}
-	fmt.Fprintf(a.Out, "enable-all: %s\n", result.Summary())
+	out := newOutput(a.Out)
+	if result.Mode == "snapshot" {
+		out.Summary("enable-all", "snapshot scope updated")
+	} else {
+		out.Summary("enable-all", "persistent scope updated")
+	}
+	out.Section("Scope")
+	out.Field("inbound", inboundLabel(flags.inboundID))
+	out.Field("factor", flags.factor)
+	out.Field("mode", result.Mode)
+	if flags.limitedOnly {
+		out.Field("limited only", yesNo(flags.limitedOnly))
+	}
+	if flags.includeDisabledClients {
+		out.Field("include disabled clients", yesNo(flags.includeDisabledClients))
+	}
+	out.Section("Result")
+	out.Field("matched", result.Matched)
+	out.Field("enrolled", result.Changed)
+	out.Field("adopted", result.Adopted)
+	out.Field("skipped", result.SkippedExisting)
+	out.Field("conflicts", result.Conflicts)
+	out.Field("missing", result.Missing)
 	return 0
 }
 
@@ -402,7 +487,12 @@ func (a *App) runLifecycle(ctx context.Context, opts commonOptions, args []strin
 		a.printError(err)
 		return commandErrorCode(err)
 	}
-	fmt.Fprintf(a.Out, "%s: %s rule=%d email=%s inbound=%d\n", command, resultState, rule.ID, rule.Email, rule.InboundID)
+	out := newOutput(a.Out)
+	out.Summary(command, "rule "+resultState)
+	out.Section("Rule")
+	out.Field("rule", rule.ID)
+	out.Field("email", rule.Email)
+	out.Field("inbound", rule.InboundID)
 	return 0
 }
 
@@ -424,7 +514,15 @@ func (a *App) runBulkLifecycle(ctx context.Context, opts commonOptions, args []s
 		a.printError(err)
 		return commandErrorCode(err)
 	}
-	fmt.Fprintf(a.Out, "%s: %s\n", label, result.Summary())
+	out := newOutput(a.Out)
+	out.Summary(label, "completed")
+	out.Section("Result")
+	out.Field("matched", result.Matched)
+	out.Field("changed", result.Changed)
+	out.Field("adopted", result.Adopted)
+	out.Field("skipped", result.SkippedExisting)
+	out.Field("conflicts", result.Conflicts)
+	out.Field("missing", result.Missing)
 	return 0
 }
 
@@ -520,13 +618,18 @@ func (a *App) runAudit(ctx context.Context, opts commonOptions, args []string) i
 		fmt.Fprintln(a.Out, "audit: no events")
 		return 0
 	}
+	out := newOutput(a.Out)
+	out.Summary("audit", "events found")
+	out.Section("Result")
+	out.Field("entries", len(events))
+	out.Section("Events")
 	for _, event := range events {
 		ruleID := "-"
 		if event.RuleID != nil {
 			ruleID = strconv.FormatInt(*event.RuleID, 10)
 		}
 		ts := time.Unix(event.CreatedAt, 0).UTC().Format(time.RFC3339)
-		fmt.Fprintf(a.Out, "%s rule=%s type=%s %s\n", ts, ruleID, event.EventType, event.Message)
+		fmt.Fprintf(a.Out, "  %s  rule=%s  type=%s  %s\n", ts, ruleID, event.EventType, event.Message)
 	}
 	return 0
 }
@@ -548,8 +651,13 @@ func (a *App) runBackup(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintf(a.Out, "backup: created path=%s\n", path)
-	fmt.Fprintln(a.Out, "restore: manual only; stop x-ui and xui-factor before replacing the database")
+	out := newOutput(a.Out)
+	out.Summary("backup", "created")
+	out.Section("Backup")
+	out.Field("path", path)
+	out.Section("Restore")
+	out.Field("mode", "manual only")
+	out.Field("hint", "stop x-ui and xui-factor before replacing the database")
 	return 0
 }
 
@@ -576,13 +684,14 @@ func (a *App) runCleanup(ctx context.Context, opts commonOptions, args []string)
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintf(a.Out, "cleanup: missing_clients_pruned=%d disabled_rules_pruned=%d disabled_scopes_pruned=%d audit_events_pruned=%d vacuum_run=%t\n",
-		result.MissingClientsPruned,
-		result.DisabledRulesPruned,
-		result.DisabledScopesPruned,
-		result.AuditEventsPruned,
-		result.VacuumRun,
-	)
+	out := newOutput(a.Out)
+	out.Summary("cleanup", "completed")
+	out.Section("Result")
+	out.Field("missing clients pruned", result.MissingClientsPruned)
+	out.Field("disabled rules pruned", result.DisabledRulesPruned)
+	out.Field("disabled scopes pruned", result.DisabledScopesPruned)
+	out.Field("audit events pruned", result.AuditEventsPruned)
+	out.Field("vacuum run", yesNo(result.VacuumRun))
 	return 0
 }
 
@@ -607,7 +716,15 @@ func (a *App) runReconcile(ctx context.Context, opts commonOptions, args []strin
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintf(a.Out, "reconcile: %s\n", result.Summary())
+	out := newOutput(a.Out)
+	out.Summary("reconcile", "completed")
+	out.Section("Result")
+	out.Field("checked", result.Checked)
+	out.Field("reconciled", result.Reconciled)
+	out.Field("orphaned", result.Orphaned)
+	out.Field("disabled clients", result.DisabledClients)
+	out.Field("superseded", result.Superseded)
+	out.Field("conflicts", result.Conflicts)
 	return 0
 }
 
@@ -629,7 +746,17 @@ func (a *App) runTick(ctx context.Context, opts commonOptions, args []string) in
 		a.printError(err)
 		return 1
 	}
-	fmt.Fprintf(a.Out, "tick: %s\n", result.Summary())
+	out := newOutput(a.Out)
+	out.Summary("tick", "completed")
+	out.Section("Result")
+	out.Field("active clients", result.ActiveClients)
+	out.Field("reconciled", result.Reconciled)
+	out.Field("enrolled", result.Enrolled)
+	out.Field("enroll skipped", result.EnrollSkipped)
+	out.Field("applied", result.Applied)
+	out.Field("baselined", result.Baselined)
+	out.Field("rebaselined", result.Rebaselined)
+	out.Field("missing", result.Missing)
 	return 0
 }
 
@@ -1191,6 +1318,22 @@ func printRule(w io.Writer, rule store.Rule) {
 
 func (a *App) printError(err error) {
 	fmt.Fprintf(a.Err, "error: %v\n", err)
+}
+
+func (a *App) printTargetError(message, email string, inboundID *int64, hint string) {
+	out := newOutput(a.Err)
+	fmt.Fprintf(a.Err, "error: %s\n", message)
+	out.Section("Target")
+	out.Field("email", strings.TrimSpace(email))
+	if inboundID != nil {
+		out.Field("inbound", *inboundID)
+	} else {
+		out.Field("inbound", "any")
+	}
+	if hint != "" {
+		out.Section("Hint")
+		out.Field("run", hint)
+	}
 }
 
 func (a *App) ensureWriters() {

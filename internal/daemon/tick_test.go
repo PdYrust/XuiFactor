@@ -564,6 +564,50 @@ func TestPersistentAutoEnrollWorksAfterConsolidation(t *testing.T) {
 	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000, lastAllTime: 3000})
 }
 
+func TestInboundScopeEffectiveDecisionWinsOverGlobalScope(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	defer h.store.Close()
+
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "5"}); err != nil {
+		t.Fatalf("enable global scope: %v", err)
+	}
+	globalRuleID := scopeRuleID(t, h.dbPath)
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable inbound scope: %v", err)
+	}
+	inboundRuleID := scopeRuleIDForInbound(t, h.dbPath, inboundID)
+	insertScopeRuleClient(t, h.dbPath, inboundRuleID, 1)
+	setCounters(t, h.dbPath, 1, 110, 220, 330)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.ActiveClients != 1 || result.Applied != 1 {
+		t.Fatalf("result = %#v, want one effective applied client", result)
+	}
+	assertCounters(t, h.dbPath, 1, 120, 240, 360)
+	assertRuleClientForRule(t, h.dbPath, inboundRuleID, 1, ruleClientState{lastUp: 120, lastDown: 240, lastAllTime: 360})
+	assertRuleClientForRule(t, h.dbPath, globalRuleID, 1, ruleClientState{lastUp: 120, lastDown: 240, lastAllTime: 360})
+
+	db := openTickDB(t, h.dbPath)
+	execTickSQL(t, db, `UPDATE xui_factor_rules SET state='disabled' WHERE id=?`, inboundRuleID)
+	db.Close()
+	setCounters(t, h.dbPath, 1, 130, 260, 390)
+
+	result, err = h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if result.ActiveClients != 1 || result.Applied != 1 {
+		t.Fatalf("second result = %#v, want one global applied client", result)
+	}
+	assertCounters(t, h.dbPath, 1, 170, 340, 510)
+	assertRuleClientForRule(t, h.dbPath, globalRuleID, 1, ruleClientState{lastUp: 170, lastDown: 340, lastAllTime: 510})
+}
+
 func TestAutoCleanupRunsDuringTickWhenEnabled(t *testing.T) {
 	ctx := context.Background()
 	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
@@ -922,6 +966,23 @@ func assertRuleClient(t *testing.T, dbPath string, trafficID int64, want ruleCli
 	}
 }
 
+func assertRuleClientForRule(t *testing.T, dbPath string, ruleID, trafficID int64, want ruleClientState) {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	var got ruleClientState
+	if err := db.QueryRow(`
+		SELECT last_up, last_down, last_all_time, rem_up, rem_down, rem_all_time
+		FROM xui_factor_rule_clients
+		WHERE rule_id=? AND traffic_id=?
+	`, ruleID, trafficID).Scan(&got.lastUp, &got.lastDown, &got.lastAllTime, &got.remUp, &got.remDown, &got.remAllTime); err != nil {
+		t.Fatalf("read rule client: %v", err)
+	}
+	if got != want {
+		t.Fatalf("rule client = %#v, want %#v", got, want)
+	}
+}
+
 func setRuleClientRemainders(t *testing.T, dbPath string, trafficID, remUp, remDown, remAllTime int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)
@@ -987,6 +1048,34 @@ func scopeRuleID(t *testing.T, dbPath string) int64 {
 		t.Fatalf("read scope rule id: %v", err)
 	}
 	return ruleID
+}
+
+func scopeRuleIDForInbound(t *testing.T, dbPath string, inboundID int64) int64 {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	var ruleID int64
+	if err := db.QueryRow(`SELECT rule_id FROM xui_factor_scopes WHERE inbound_id=? ORDER BY rule_id LIMIT 1`, inboundID).Scan(&ruleID); err != nil {
+		t.Fatalf("read inbound scope rule id: %v", err)
+	}
+	return ruleID
+}
+
+func insertScopeRuleClient(t *testing.T, dbPath string, ruleID, trafficID int64) {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	now := int64(1_700_000_000)
+	execTickSQL(t, db, `
+		INSERT INTO xui_factor_rule_clients(
+			rule_id, traffic_id, inbound_id, email,
+			last_up, last_down, last_all_time,
+			rem_up, rem_down, rem_all_time, missing_since, updated_at
+		)
+		SELECT ?, id, inbound_id, email, up, down, all_time, 0, 0, 0, NULL, ?
+		FROM client_traffics
+		WHERE id=?
+	`, ruleID, now, trafficID)
 }
 
 func ruleClientExistsForRule(t *testing.T, dbPath string, ruleID, trafficID int64) bool {

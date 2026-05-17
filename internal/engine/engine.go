@@ -214,9 +214,9 @@ func normalizeEmail(email string) (string, error) {
 func describeSelectorError(action string, err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return fmt.Errorf("%s: no matching record", action)
+		return fmt.Errorf("%s: %w: no matching record", action, store.ErrNotFound)
 	case errors.Is(err, store.ErrAmbiguous):
-		return fmt.Errorf("%s: multiple matches; pass --inbound-id", action)
+		return fmt.Errorf("%s: %w: multiple matches; pass --inbound-id", action, store.ErrAmbiguous)
 	default:
 		return fmt.Errorf("%s: %w", action, err)
 	}
