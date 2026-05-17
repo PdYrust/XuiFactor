@@ -1,0 +1,53 @@
+name: Documentation issue
+description: Report missing, unclear, or outdated XuiFactor documentation.
+title: "[Docs]: "
+labels:
+  - documentation
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the documentation problem directly.
+    validations:
+      required: true
+  - type: dropdown
+    id: doc_area
+    attributes:
+      label: Documentation area
+      options:
+        - README
+        - Operations guide
+        - Release notes
+        - Install or update instructions
+        - CLI examples
+        - Policy behavior
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current text or location
+      description: Paste the relevant excerpt or link to the section.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected documentation
+      description: Explain what should be clarified or added.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Include the command or workflow that led to confusion. Redact sensitive data.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the latest README and operations guide.
+          required: true
+        - label: I did not include sensitive server data.
+          required: true

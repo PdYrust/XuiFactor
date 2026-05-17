@@ -1,0 +1,61 @@
+name: Feature request
+description: Propose a focused XuiFactor product, CLI, documentation, or packaging improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: State the request in one or two direct sentences.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - policy behavior
+        - CLI output
+        - daemon service
+        - report or audit
+        - cleanup or reconcile
+        - installation or packaging
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or gap
+      description: Explain what is difficult, unclear, or missing today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the operator-facing behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope notes
+      description: Call out constraints, non-goals, or why this should stay narrow.
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Include examples, commands, or environment details if useful. Redact sensitive data.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the current documentation and existing issues first.
+          required: true
+        - label: I described the request in terms of current XuiFactor behavior.
+          required: true

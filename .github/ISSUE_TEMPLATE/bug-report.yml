@@ -1,0 +1,96 @@
+name: Bug report
+description: Report a reproducible XuiFactor problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste sensitive data such as UUIDs, tokens, private keys, domain secrets, or full database files.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the problem directly.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - CLI command
+        - daemon service
+        - policy decision
+        - cleanup or reconcile
+        - report or audit
+        - package or installer
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: XuiFactor version
+      placeholder: xui-factor version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, architecture, install method, package architecture, and 3x-ui version if available.
+      placeholder: |
+        OS: Debian 12
+        architecture: linux_amd64
+        install method: release package
+        3x-ui version: unknown
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or workflow
+      description: Paste the command sequence or exact package workflow.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Paste the smallest useful output, error text, or log excerpt.
+      render: text
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Include sanitized `xui-factor doctor`, `xui-factor status`, and service state output when relevant.
+      placeholder: |
+        xui-factor doctor
+        xui-factor status
+        systemctl status xui-factor.service --no-pager
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the current documentation and existing issues first.
+          required: true
+        - label: I redacted sensitive data and private identifiers.
+          required: true
