@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -305,33 +306,41 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 }
 
 func (s *Store) ListEvents(ctx context.Context, filter EventFilter) ([]Event, error) {
-	if filter.Limit <= 0 {
-		filter.Limit = 50
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 50
 	}
+	postFilter := strings.TrimSpace(filter.Email) != "" || filter.InboundID != nil || filter.PolicyID != nil
 	query := `
-		SELECT e.id, e.rule_id, e.event_type, COALESCE(e.message, ''), e.created_at
-		FROM xui_factor_events e`
-	args := make([]any, 0, 3)
-	where := make([]string, 0, 2)
-	if strings.TrimSpace(filter.Email) != "" || filter.InboundID != nil {
-		query += `
-		INNER JOIN xui_factor_rules r ON r.id = e.rule_id`
-		if strings.TrimSpace(filter.Email) != "" {
-			where = append(where, "r.email = ?")
-			args = append(args, strings.TrimSpace(filter.Email))
-		}
-		if filter.InboundID != nil {
-			where = append(where, "r.inbound_id = ?")
-			args = append(args, *filter.InboundID)
-		}
+		SELECT e.id, e.rule_id, e.event_type, COALESCE(e.message, ''), e.created_at,
+			COALESCE(r.email, ''), COALESCE(s.inbound_id, r.inbound_id)
+		FROM xui_factor_events e
+		LEFT JOIN xui_factor_rules r ON r.id = e.rule_id
+		LEFT JOIN xui_factor_scopes s ON s.rule_id = r.id`
+	args := make([]any, 0, 4)
+	where := make([]string, 0, 3)
+	if strings.TrimSpace(filter.EventType) != "" {
+		where = append(where, "e.event_type = ?")
+		args = append(args, strings.TrimSpace(filter.EventType))
+	}
+	if filter.RuleID != nil {
+		where = append(where, "e.rule_id = ?")
+		args = append(args, *filter.RuleID)
+	}
+	if filter.Since != nil {
+		where = append(where, "e.created_at >= ?")
+		args = append(args, *filter.Since)
 	}
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += `
-		ORDER BY e.id DESC
+		ORDER BY e.id DESC`
+	if !postFilter && limit > 0 {
+		query += `
 		LIMIT ?`
-	args = append(args, filter.Limit)
+		args = append(args, limit)
+	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -343,18 +352,117 @@ func (s *Store) ListEvents(ctx context.Context, filter EventFilter) ([]Event, er
 	for rows.Next() {
 		var event Event
 		var ruleID sql.NullInt64
-		if err := rows.Scan(&event.ID, &ruleID, &event.EventType, &event.Message, &event.CreatedAt); err != nil {
+		var inboundID sql.NullInt64
+		var ruleEmail string
+		if err := rows.Scan(&event.ID, &ruleID, &event.EventType, &event.Message, &event.CreatedAt, &ruleEmail, &inboundID); err != nil {
 			return nil, err
 		}
 		if ruleID.Valid {
 			event.RuleID = &ruleID.Int64
 		}
+		event.Email = ruleEmail
+		if inboundID.Valid {
+			event.InboundID = &inboundID.Int64
+		}
+		hydrateEventFromMessage(&event)
+		if !eventMatchesFilter(event, filter) {
+			continue
+		}
 		events = append(events, event)
+		if postFilter && limit > 0 && len(events) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return events, nil
+}
+
+func (s *Store) TrafficImpact(ctx context.Context, filter EventFilter) (TrafficImpact, error) {
+	filter.EventType = EventTrafficApply
+	filter.Limit = -1
+	events, err := s.ListEvents(ctx, filter)
+	if err != nil {
+		return TrafficImpact{}, err
+	}
+	var impact TrafficImpact
+	for _, event := range events {
+		impact.Applications++
+		if impact.LastAppliedAt == nil || event.CreatedAt > *impact.LastAppliedAt {
+			createdAt := event.CreatedAt
+			impact.LastAppliedAt = &createdAt
+		}
+		extra, ok := eventExtraAllTime(event.Message)
+		if !ok || extra <= 0 {
+			continue
+		}
+		const maxInt64 = int64(^uint64(0) >> 1)
+		if impact.ExtraBytes > maxInt64-extra {
+			impact.ExtraBytes = maxInt64
+			continue
+		}
+		impact.ExtraBytes += extra
+	}
+	return impact, nil
+}
+
+func eventMatchesFilter(event Event, filter EventFilter) bool {
+	if strings.TrimSpace(filter.Email) != "" && event.Email != strings.TrimSpace(filter.Email) {
+		return false
+	}
+	if filter.InboundID != nil {
+		if event.InboundID == nil || *event.InboundID != *filter.InboundID {
+			return false
+		}
+	}
+	if filter.PolicyID != nil {
+		if event.PolicyID == nil || *event.PolicyID != *filter.PolicyID {
+			return false
+		}
+	}
+	return true
+}
+
+func hydrateEventFromMessage(event *Event) {
+	fields := strings.Fields(event.Message)
+	for i, field := range fields {
+		clean := strings.Trim(field, " ,.;:")
+		switch {
+		case clean == "policy" && i+1 < len(fields):
+			if id, err := strconv.ParseInt(strings.Trim(fields[i+1], " ,.;:"), 10, 64); err == nil {
+				event.PolicyID = &id
+			}
+		case clean == "inbound" && i+1 < len(fields):
+			if id, err := strconv.ParseInt(strings.Trim(fields[i+1], " ,.;:"), 10, 64); err == nil {
+				event.InboundID = &id
+			}
+		case strings.HasPrefix(clean, "inbound="):
+			if id, err := strconv.ParseInt(strings.TrimPrefix(clean, "inbound="), 10, 64); err == nil {
+				event.InboundID = &id
+			}
+		case clean == "email" && i+1 < len(fields):
+			event.Email = strings.Trim(fields[i+1], " ,.;:")
+		case strings.HasPrefix(clean, "email="):
+			event.Email = strings.TrimPrefix(clean, "email=")
+		}
+	}
+}
+
+func eventExtraAllTime(message string) (int64, bool) {
+	for _, field := range strings.Fields(message) {
+		clean := strings.Trim(field, " ,.;:")
+		if !strings.HasPrefix(clean, "extra_all_time=") {
+			continue
+		}
+		value := strings.TrimPrefix(clean, "extra_all_time=")
+		extra, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return extra, true
+	}
+	return 0, false
 }
 
 func scanRule(row *sql.Row) (Rule, error) {

@@ -103,6 +103,8 @@ func (a *App) Run(args []string) int {
 		return a.runResumeAll(ctx, common, args[1:])
 	case "audit":
 		return a.runAudit(ctx, common, args[1:])
+	case "report":
+		return a.runReport(ctx, common, args[1:])
 	case "backup":
 		return a.runBackup(ctx, common, args[1:])
 	case "cleanup":
@@ -937,66 +939,90 @@ func (a *App) runBulkLifecycle(ctx context.Context, opts commonOptions, args []s
 	return 0
 }
 
+func (a *App) runReport(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseReportArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	cfg, err := loadConfig(opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	st, err := store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+	if err := st.ValidateRequiredSchema(ctx); err != nil {
+		a.printError(err)
+		return 1
+	}
+	svc := engine.New(st)
+	result, err := svc.Report(ctx, engine.ReportRequest{InboundID: flags.inboundID, IncludeAll: flags.includeAll})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+
+	service := systemdServiceState()
+	out := newOutput(a.Out)
+	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
+	out.Section("Report")
+	out.Field("database", cfg.DatabasePath)
+	if flags.inboundID != nil {
+		out.Field("inbound", *flags.inboundID)
+	}
+	out.Field("service", service.Active)
+	if result.MetadataReady {
+		out.Field("metadata", "ok")
+	} else {
+		out.Field("metadata", "unavailable")
+		out.Section("Policies")
+		out.Field("active scopes", 0)
+		out.Field("active excludes", 0)
+		out.Field("active overrides", 0)
+		out.Field("active single-user rules", 0)
+		return 0
+	}
+
+	out.Section("Policies")
+	out.Field("active scopes", result.ActiveScopes)
+	out.Field("active excludes", result.ActiveExcludes)
+	out.Field("active overrides", result.ActiveOverrides)
+	out.Field("active single-user rules", result.ActiveSingleUserRules)
+	if flags.includeAll {
+		out.Field("paused rules", result.PausedRules)
+		out.Field("inactive rules", result.DisabledRules)
+		out.Field("inactive excludes", result.InactiveExcludes)
+		out.Field("inactive overrides", result.InactiveOverrides)
+	}
+
+	out.Section("Effective Clients")
+	out.Field("factored", result.EffectiveFactoredClients)
+	out.Field("excluded", result.ExcludedClients)
+	out.Field("overridden", result.OverriddenClients)
+	out.Field("no factor", result.NoFactorClients)
+	out.Field("active rule clients", result.TotalActiveRuleClients)
+
+	out.Section("Traffic Impact")
+	out.Field("extra applied", formatBytes(result.TrafficImpact.ExtraBytes))
+	out.Field("tick applications", result.TrafficImpact.Applications)
+	if result.TrafficImpact.LastAppliedAt != nil {
+		out.Field("last tick", formatEventTime(*result.TrafficImpact.LastAppliedAt))
+	} else {
+		out.Field("last tick", "unavailable")
+	}
+	return 0
+}
+
 func (a *App) runAudit(ctx context.Context, opts commonOptions, args []string) int {
-	limit := 50
-	var email string
-	var inboundID *int64
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--limit":
-			value, next, err := readFlagValue(args, i, "--limit")
-			if err != nil {
-				a.printError(err)
-				return 2
-			}
-			limit, err = strconv.Atoi(value)
-			if err != nil || limit <= 0 {
-				a.printError(errors.New("audit: --limit must be a positive integer"))
-				return 2
-			}
-			i = next
-		case strings.HasPrefix(args[i], "--limit="):
-			value := strings.TrimPrefix(args[i], "--limit=")
-			var err error
-			limit, err = strconv.Atoi(value)
-			if err != nil || limit <= 0 {
-				a.printError(errors.New("audit: --limit must be a positive integer"))
-				return 2
-			}
-		case args[i] == "--email":
-			value, next, err := readFlagValue(args, i, "--email")
-			if err != nil {
-				a.printError(err)
-				return 2
-			}
-			email = value
-			i = next
-		case strings.HasPrefix(args[i], "--email="):
-			email = strings.TrimPrefix(args[i], "--email=")
-		case args[i] == "--inbound-id":
-			value, next, err := readFlagValue(args, i, "--inbound-id")
-			if err != nil {
-				a.printError(err)
-				return 2
-			}
-			id, err := parsePositiveInt64(value, "--inbound-id")
-			if err != nil {
-				a.printError(err)
-				return 2
-			}
-			inboundID = &id
-			i = next
-		case strings.HasPrefix(args[i], "--inbound-id="):
-			id, err := parsePositiveInt64(strings.TrimPrefix(args[i], "--inbound-id="), "--inbound-id")
-			if err != nil {
-				a.printError(err)
-				return 2
-			}
-			inboundID = &id
-		default:
-			a.printError(fmt.Errorf("audit: unknown argument %q", args[i]))
-			return 2
-		}
+	flags, err := parseAuditArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
 	}
 
 	svc, st, err := a.openReadOnlyService(ctx, opts)
@@ -1012,37 +1038,61 @@ func (a *App) runAudit(ctx context.Context, opts commonOptions, args []string) i
 		return 1
 	}
 	if !metadataReady {
-		fmt.Fprintln(a.Out, "audit: no events")
+		out := newOutput(a.Out)
+		out.Title("Audit")
+		fmt.Fprintln(a.Out, "  no events matched")
 		return 0
 	}
 
 	events, err := svc.Audit(ctx, engine.AuditRequest{
-		Limit:     limit,
-		Email:     email,
-		InboundID: inboundID,
+		Limit:     flags.limit,
+		EventType: flags.eventType,
+		Email:     flags.email,
+		InboundID: flags.inboundID,
+		RuleID:    flags.ruleID,
+		PolicyID:  flags.policyID,
+		Since:     flags.since,
 	})
 	if err != nil {
 		a.printError(err)
 		return 1
 	}
+	out := newOutput(a.Out)
+	out.Title("Audit")
+	out.Field("filter", auditFilterSummary(flags))
 	if len(events) == 0 {
-		fmt.Fprintln(a.Out, "audit: no events")
+		fmt.Fprintln(a.Out, "  no events matched")
 		return 0
 	}
-	out := newOutput(a.Out)
-	out.Summary("audit", "events found")
-	out.Section("Result")
-	out.Field("entries", len(events))
 	out.Section("Events")
 	for _, event := range events {
-		ruleID := "-"
-		if event.RuleID != nil {
-			ruleID = strconv.FormatInt(*event.RuleID, 10)
-		}
-		ts := time.Unix(event.CreatedAt, 0).UTC().Format(time.RFC3339)
-		fmt.Fprintf(a.Out, "  %s  rule=%s  type=%s  %s\n", ts, ruleID, event.EventType, event.Message)
+		out.Event(event)
 	}
 	return 0
+}
+
+func auditFilterSummary(flags auditFlags) string {
+	parts := make([]string, 0, 7)
+	if flags.eventType != "" {
+		parts = append(parts, "event="+flags.eventType)
+	}
+	if flags.email != "" {
+		parts = append(parts, "email="+flags.email)
+	}
+	if flags.inboundID != nil {
+		parts = append(parts, "inbound="+strconv.FormatInt(*flags.inboundID, 10))
+	}
+	if flags.ruleID != nil {
+		parts = append(parts, "rule="+strconv.FormatInt(*flags.ruleID, 10))
+	}
+	if flags.policyID != nil {
+		parts = append(parts, "policy="+strconv.FormatInt(*flags.policyID, 10))
+	}
+	if flags.sinceText != "" {
+		parts = append(parts, "since="+flags.sinceText)
+	}
+	parts = append(parts, "limit="+strconv.Itoa(flags.limit))
+	return strings.Join(parts, " ")
 }
 
 func (a *App) runBackup(ctx context.Context, opts commonOptions, args []string) int {
@@ -1449,6 +1499,22 @@ type statusFlags struct {
 type explainFlags struct {
 	email     string
 	inboundID *int64
+}
+
+type reportFlags struct {
+	inboundID  *int64
+	includeAll bool
+}
+
+type auditFlags struct {
+	limit     int
+	eventType string
+	email     string
+	inboundID *int64
+	ruleID    *int64
+	policyID  *int64
+	since     time.Duration
+	sinceText string
 }
 
 type cleanupFlags struct {
@@ -1861,6 +1927,169 @@ func parseExplainArgs(args []string) (explainFlags, error) {
 	return flags, nil
 }
 
+func parseReportArgs(args []string) (reportFlags, error) {
+	var flags reportFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--all":
+			flags.includeAll = true
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		default:
+			return flags, fmt.Errorf("report: unknown argument %q", arg)
+		}
+	}
+	return flags, nil
+}
+
+func parseAuditArgs(args []string) (auditFlags, error) {
+	flags := auditFlags{limit: 50}
+	eventSpecified := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--limit":
+			value, next, err := readFlagValue(args, i, "--limit")
+			if err != nil {
+				return flags, err
+			}
+			limit, err := parsePositiveInt(value, "--limit")
+			if err != nil {
+				return flags, err
+			}
+			flags.limit = limit
+			i = next
+		case strings.HasPrefix(arg, "--limit="):
+			limit, err := parsePositiveInt(strings.TrimPrefix(arg, "--limit="), "--limit")
+			if err != nil {
+				return flags, err
+			}
+			flags.limit = limit
+		case arg == "--event":
+			value, next, err := readFlagValue(args, i, "--event")
+			if err != nil {
+				return flags, err
+			}
+			eventSpecified = true
+			flags.eventType = normalizeAuditEventType(value)
+			i = next
+		case strings.HasPrefix(arg, "--event="):
+			eventSpecified = true
+			flags.eventType = normalizeAuditEventType(strings.TrimPrefix(arg, "--event="))
+		case arg == "--email":
+			value, next, err := readFlagValue(args, i, "--email")
+			if err != nil {
+				return flags, err
+			}
+			flags.email = value
+			i = next
+		case strings.HasPrefix(arg, "--email="):
+			flags.email = strings.TrimPrefix(arg, "--email=")
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		case arg == "--rule-id":
+			value, next, err := readFlagValue(args, i, "--rule-id")
+			if err != nil {
+				return flags, err
+			}
+			ruleID, err := parsePositiveInt64(value, "--rule-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.ruleID = &ruleID
+			i = next
+		case strings.HasPrefix(arg, "--rule-id="):
+			ruleID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--rule-id="), "--rule-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.ruleID = &ruleID
+		case arg == "--policy-id":
+			value, next, err := readFlagValue(args, i, "--policy-id")
+			if err != nil {
+				return flags, err
+			}
+			policyID, err := parsePositiveInt64(value, "--policy-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.policyID = &policyID
+			i = next
+		case strings.HasPrefix(arg, "--policy-id="):
+			policyID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--policy-id="), "--policy-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.policyID = &policyID
+		case arg == "--since":
+			value, next, err := readFlagValue(args, i, "--since")
+			if err != nil {
+				return flags, err
+			}
+			since, err := parseDurationFlag(value, "audit: --since")
+			if err != nil {
+				return flags, err
+			}
+			flags.since = since
+			flags.sinceText = value
+			i = next
+		case strings.HasPrefix(arg, "--since="):
+			value := strings.TrimPrefix(arg, "--since=")
+			since, err := parseDurationFlag(value, "audit: --since")
+			if err != nil {
+				return flags, err
+			}
+			flags.since = since
+			flags.sinceText = value
+		default:
+			return flags, fmt.Errorf("audit: unknown argument %q", arg)
+		}
+	}
+	if eventSpecified && flags.eventType == "" {
+		return flags, errors.New("audit: --event is required")
+	}
+	return flags, nil
+}
+
+func normalizeAuditEventType(value string) string {
+	eventType := strings.TrimSpace(value)
+	if eventType == "tick" {
+		return store.EventTrafficApply
+	}
+	return eventType
+}
+
 func parseCleanupArgs(args []string) (cleanupFlags, error) {
 	var flags cleanupFlags
 	for i := 0; i < len(args); i++ {
@@ -2011,6 +2240,33 @@ func parsePositiveInt64(value, name string) (int64, error) {
 	return parsed, nil
 }
 
+func parsePositiveInt(value, name string) (int, error) {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return parsed, nil
+}
+
+func parseDurationFlag(value, name string) (time.Duration, error) {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		if !strings.HasSuffix(value, "d") {
+			return 0, fmt.Errorf("%s must be a positive duration", name)
+		}
+		daysPart := strings.TrimSuffix(value, "d")
+		days, daysErr := strconv.Atoi(daysPart)
+		if strings.TrimSpace(daysPart) == "" || daysErr != nil {
+			return 0, fmt.Errorf("%s must be a positive duration", name)
+		}
+		d = time.Duration(days) * 24 * time.Hour
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration", name)
+	}
+	return d, nil
+}
+
 func commandErrorCode(err error) int {
 	if errors.Is(err, store.ErrConflict) {
 		return 1
@@ -2100,6 +2356,7 @@ Commands:
   pause-all  Pause active rules
   resume     Resume a paused rule from current counters
   resume-all Resume paused rules from current counters
+  report     Show concise management report
   audit      Show lifecycle events
   backup     Create a timestamped SQLite backup
   cleanup    Prune stale XuiFactor metadata
@@ -2125,6 +2382,10 @@ Examples:
   %s excludes
   %s override --email user@example.com --inbound-id 1 --factor 1.2
   %s overrides
+  %s report
+  %s report --inbound-id 1
+  %s audit --event traffic_applied --limit 20
+  %s audit --since 24h
   %s disable --email user@example.com
   %s disable-all
   %s backup
@@ -2133,7 +2394,7 @@ Examples:
   %s doctor
   %s tick
   %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 func (a *App) printVersion(w io.Writer) {

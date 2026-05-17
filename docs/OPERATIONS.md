@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.3.3-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.3-beta_linux_amd64
+tar -xzf xui-factor_v0.3.4-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.4-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -274,7 +274,16 @@ journalctl -u xui-factor.service -f
 
 The service runs `xui-factor` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
 
-## 17. Status and audit
+## 17. Report, status, and audit
+
+Show a concise management report:
+
+```sh
+xui-factor report
+xui-factor report --inbound-id 1
+```
+
+Report summarizes active scopes, single-user rules, excludes, overrides, effective clients, service state, metadata state, and traffic impact. Traffic impact is aggregated from `traffic_applied` audit events. v0.3.4-beta adds inbound and email metadata to new traffic audit events so filtered impact reports improve from this release forward; older events are not rewritten.
 
 List effective active and paused rules:
 
@@ -298,6 +307,14 @@ Show audit events for one client:
 
 ```sh
 xui-factor audit --email User --inbound-id 1
+```
+
+Filter audit events:
+
+```sh
+xui-factor audit --event override_enabled --limit 20
+xui-factor audit --email User --inbound-id 1
+xui-factor audit --since 24h
 ```
 
 Use status and audit after lifecycle changes to confirm the intended rule state.

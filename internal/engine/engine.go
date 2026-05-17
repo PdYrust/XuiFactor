@@ -29,8 +29,12 @@ type RuleSelector struct {
 
 type AuditRequest struct {
 	Limit     int
+	EventType string
 	Email     string
 	InboundID *int64
+	RuleID    *int64
+	PolicyID  *int64
+	Since     time.Duration
 }
 
 func New(st *store.Store) *Service {
@@ -196,10 +200,19 @@ func (s *Service) Status(ctx context.Context, includeDisabled bool) ([]store.Rul
 }
 
 func (s *Service) Audit(ctx context.Context, req AuditRequest) ([]store.Event, error) {
+	var since *int64
+	if req.Since > 0 {
+		cutoff := s.now().Add(-req.Since).Unix()
+		since = &cutoff
+	}
 	return s.store.ListEvents(ctx, store.EventFilter{
 		Limit:     req.Limit,
+		EventType: strings.TrimSpace(req.EventType),
 		Email:     strings.TrimSpace(req.Email),
 		InboundID: req.InboundID,
+		RuleID:    req.RuleID,
+		PolicyID:  req.PolicyID,
+		Since:     since,
 	})
 }
 
