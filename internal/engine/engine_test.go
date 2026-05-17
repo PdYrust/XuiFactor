@@ -166,6 +166,102 @@ func TestExcludeSameEmailDifferentTrafficIsDifferentClient(t *testing.T) {
 	}
 }
 
+func TestOverrideLifecycleUsesExactClientIdentity(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	policy, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2", Note: "trial"})
+	if err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if policy.State != store.StateActive || policy.TrafficID != 1 || policy.InboundID != inboundID || policy.Email != "user@example.com" || policy.FactorPPM != 1_200_000 {
+		t.Fatalf("policy = %#v, want active exact identity", policy)
+	}
+
+	updated, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.5", Note: "updated"})
+	if err != nil {
+		t.Fatalf("update override: %v", err)
+	}
+	if updated.ID != policy.ID || updated.FactorPPM != 1_500_000 {
+		t.Fatalf("updated policy = %#v, want same policy with new factor", updated)
+	}
+
+	policies, err := svc.Overrides(ctx, OverrideListRequest{})
+	if err != nil {
+		t.Fatalf("list overrides: %v", err)
+	}
+	if len(policies) != 1 || policies[0].Note != "updated" {
+		t.Fatalf("policies = %#v, want one active override", policies)
+	}
+
+	disabled, err := svc.RemoveOverride(ctx, OverrideSelector{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("remove override: %v", err)
+	}
+	if disabled.State != store.StateDisabled {
+		t.Fatalf("state = %s, want disabled", disabled.State)
+	}
+	policies, err = svc.Overrides(ctx, OverrideListRequest{IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("list all overrides: %v", err)
+	}
+	if len(policies) != 1 || policies[0].State != store.StateDisabled {
+		t.Fatalf("policies = %#v, want one inactive override", policies)
+	}
+
+	db := openTestDB(t, dbPath)
+	defer db.Close()
+	if got := countEngineEvents(t, db, store.EventOverrideEnable); got != 1 {
+		t.Fatalf("override enable events = %d, want 1", got)
+	}
+	if got := countEngineEvents(t, db, store.EventOverrideUpdate); got != 1 {
+		t.Fatalf("override update events = %d, want 1", got)
+	}
+	if got := countEngineEvents(t, db, store.EventOverrideDisable); got != 1 {
+		t.Fatalf("override disable events = %d, want 1", got)
+	}
+}
+
+func TestOverrideSameEmailDifferentTrafficIsDifferentClient(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	first, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2"})
+	if err != nil {
+		t.Fatalf("first override: %v", err)
+	}
+	db := openTestDB(t, dbPath)
+	execEngineTestSQL(t, db, `DELETE FROM client_traffics WHERE id=1`)
+	execEngineTestSQL(t, db, `
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
+		VALUES(2, ?, 1, 'user@example.com', 500, 600, 1100, 0, 0, 0, 0)
+	`, inboundID)
+	db.Close()
+
+	second, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.3"})
+	if err != nil {
+		t.Fatalf("second override: %v", err)
+	}
+	if first.ID == second.ID || first.TrafficID == second.TrafficID {
+		t.Fatalf("first=%#v second=%#v, want separate policies", first, second)
+	}
+	policies, err := svc.Overrides(ctx, OverrideListRequest{})
+	if err != nil {
+		t.Fatalf("list overrides: %v", err)
+	}
+	if len(policies) != 2 {
+		t.Fatalf("policies = %#v, want two active policies", policies)
+	}
+}
+
 func TestDisableKeepsTrafficCounters(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newTestService(t, []testTraffic{

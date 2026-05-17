@@ -81,6 +81,12 @@ func (a *App) Run(args []string) int {
 		return a.runUnexclude(ctx, common, args[1:])
 	case "excludes":
 		return a.runExcludes(ctx, common, args[1:])
+	case "override":
+		return a.runOverride(ctx, common, args[1:])
+	case "remove-override":
+		return a.runRemoveOverride(ctx, common, args[1:])
+	case "overrides":
+		return a.runOverrides(ctx, common, args[1:])
 	case "disable":
 		return a.runDisable(ctx, common, args[1:])
 	case "disable-all":
@@ -253,9 +259,16 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 			a.printError(err)
 			return 1
 		}
+		overrideCounts, err := st.CountOverrides(ctx)
+		if err != nil {
+			a.printError(err)
+			return 1
+		}
 		out.Section("Policies")
 		out.Field("active excludes", excludeCounts.Active)
 		out.Field("inactive excludes", excludeCounts.Inactive)
+		out.Field("active overrides", overrideCounts.Active)
+		out.Field("inactive overrides", overrideCounts.Inactive)
 	} else {
 		warnings = append(warnings, "rules unavailable: metadata tables are missing")
 	}
@@ -325,7 +338,23 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
+	overrideCounts, err := st.CountOverrides(ctx)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	effectiveOverrides, err := st.CountEffectiveOverrides(ctx)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	effectiveClients += effectiveOverrides
 	excludes, err := svc.Excludes(ctx, engine.ExcludeListRequest{IncludeInactive: includeDisabled})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	overrides, err := svc.Overrides(ctx, engine.OverrideListRequest{IncludeInactive: includeDisabled})
 	if err != nil {
 		a.printError(err)
 		return 1
@@ -336,6 +365,7 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 	out.Field("active rules", activeRules)
 	out.Field("paused rules", pausedRules)
 	out.Field("excludes", excludeCounts.Active)
+	out.Field("overrides", overrideCounts.Active)
 	out.Field("effective clients", effectiveClients)
 
 	scopes := make([]store.Rule, 0)
@@ -359,10 +389,13 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 			out.Rule(rule)
 		}
 	}
-	if len(excludes) > 0 {
+	if len(excludes) > 0 || len(overrides) > 0 {
 		out.Section("Policies")
 		for _, policy := range excludes {
 			out.Exclude(policy)
+		}
+		for _, policy := range overrides {
+			out.Override(policy)
 		}
 	}
 	service := systemdServiceState()
@@ -565,6 +598,113 @@ func (a *App) runExcludes(ctx context.Context, opts commonOptions, args []string
 	}
 	for _, policy := range policies {
 		out.Exclude(policy)
+	}
+	return 0
+}
+
+func (a *App) runOverride(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseOverrideArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, _, err := a.openService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	policy, err := svc.Override(ctx, engine.OverrideRequest{
+		Email:     flags.email,
+		InboundID: flags.inboundID,
+		Factor:    flags.factor,
+		Note:      flags.note,
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status")
+			return commandErrorCode(err)
+		}
+		a.printError(err)
+		return commandErrorCode(err)
+	}
+	out := newOutput(a.Out)
+	out.Summary("override", "policy enabled")
+	out.Section("Target")
+	out.Field("email", policy.Email)
+	out.Field("inbound", policy.InboundID)
+	out.Field("traffic", policy.TrafficID)
+	out.Section("Policy")
+	out.Field("factor", engine.FormatFactor(policy.FactorPPM))
+	out.Field("precedence", "user override")
+	out.Section("Result")
+	out.Field("status", policy.State)
+	out.Field("note", "future traffic uses this factor while the override is active")
+	return 0
+}
+
+func (a *App) runRemoveOverride(ctx context.Context, opts commonOptions, args []string) int {
+	selector, err := parseOverrideSelectorArgs(args, "remove-override")
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, _, err := a.openService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	policy, err := svc.RemoveOverride(ctx, engine.OverrideSelector{
+		Email:     selector.email,
+		InboundID: selector.inboundID,
+	})
+	if err != nil {
+		a.printError(err)
+		return commandErrorCode(err)
+	}
+	out := newOutput(a.Out)
+	out.Summary("remove-override", "policy disabled")
+	out.Section("Target")
+	out.Field("email", policy.Email)
+	out.Field("inbound", policy.InboundID)
+	out.Field("traffic", policy.TrafficID)
+	out.Section("Result")
+	out.Field("future traffic", "follows matching rules and scopes")
+	return 0
+}
+
+func (a *App) runOverrides(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseOverridesArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, err := a.openReadOnlyService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	policies, err := svc.Overrides(ctx, engine.OverrideListRequest{
+		InboundID:       flags.inboundID,
+		IncludeInactive: flags.includeInactive,
+	})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	out := newOutput(a.Out)
+	out.Title("Overrides")
+	if len(policies) == 0 {
+		out.Field("entries", 0)
+		return 0
+	}
+	for _, policy := range policies {
+		out.Override(policy)
 	}
 	return 0
 }
@@ -827,6 +967,7 @@ func (a *App) runCleanup(ctx context.Context, opts commonOptions, args []string)
 	out.Field("disabled rules pruned", result.DisabledRulesPruned)
 	out.Field("disabled scopes pruned", result.DisabledScopesPruned)
 	out.Field("inactive excludes pruned", result.InactiveExcludesPruned)
+	out.Field("inactive overrides pruned", result.InactiveOverridesPruned)
 	out.Field("audit events pruned", result.AuditEventsPruned)
 	out.Field("vacuum run", yesNo(result.VacuumRun))
 	return 0
@@ -1151,6 +1292,18 @@ type excludesFlags struct {
 	includeInactive bool
 }
 
+type overrideFlags struct {
+	email     string
+	inboundID *int64
+	factor    string
+	note      string
+}
+
+type overridesFlags struct {
+	inboundID       *int64
+	includeInactive bool
+}
+
 type cleanupFlags struct {
 	dryRun    bool
 	olderThan time.Duration
@@ -1367,6 +1520,110 @@ func parseExcludesArgs(args []string) (excludesFlags, error) {
 			flags.inboundID = &inboundID
 		default:
 			return flags, fmt.Errorf("excludes: unknown argument %q", arg)
+		}
+	}
+	return flags, nil
+}
+
+func parseOverrideArgs(args []string) (overrideFlags, error) {
+	flags, err := parseOverrideSelectorArgs(args, "override")
+	if err != nil {
+		return flags, err
+	}
+	if strings.TrimSpace(flags.factor) == "" {
+		return flags, errors.New("override: --factor is required")
+	}
+	return flags, nil
+}
+
+func parseOverrideSelectorArgs(args []string, command string) (overrideFlags, error) {
+	var flags overrideFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--email":
+			value, next, err := readFlagValue(args, i, "--email")
+			if err != nil {
+				return flags, err
+			}
+			flags.email = value
+			i = next
+		case strings.HasPrefix(arg, "--email="):
+			flags.email = strings.TrimPrefix(arg, "--email=")
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		case arg == "--factor" && command == "override":
+			value, next, err := readFlagValue(args, i, "--factor")
+			if err != nil {
+				return flags, err
+			}
+			flags.factor = value
+			i = next
+		case strings.HasPrefix(arg, "--factor=") && command == "override":
+			flags.factor = strings.TrimPrefix(arg, "--factor=")
+		case arg == "--note" && command == "override":
+			value, next, err := readFlagValue(args, i, "--note")
+			if err != nil {
+				return flags, err
+			}
+			flags.note = value
+			i = next
+		case strings.HasPrefix(arg, "--note=") && command == "override":
+			flags.note = strings.TrimPrefix(arg, "--note=")
+		default:
+			return flags, fmt.Errorf("%s: unknown argument %q", command, arg)
+		}
+	}
+	if strings.TrimSpace(flags.email) == "" {
+		return flags, fmt.Errorf("%s: --email is required", command)
+	}
+	if flags.inboundID == nil {
+		return flags, fmt.Errorf("%s: --inbound-id is required", command)
+	}
+	return flags, nil
+}
+
+func parseOverridesArgs(args []string) (overridesFlags, error) {
+	var flags overridesFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--all":
+			flags.includeInactive = true
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		default:
+			return flags, fmt.Errorf("overrides: unknown argument %q", arg)
 		}
 	}
 	return flags, nil
@@ -1601,6 +1858,9 @@ Commands:
   exclude    Exclude one client from factor decisions
   unexclude  Disable an exclude policy
   excludes   List exclude policies
+  override   Set one client's effective factor
+  remove-override Disable an override policy
+  overrides  List override policies
   disable    Disable a rule and keep existing results
   disable-all Disable active and paused rules
   pause      Pause a rule without changing counters
@@ -1627,6 +1887,8 @@ Examples:
   %s enable-all --factor 1.2 --once
   %s exclude --email user@example.com --inbound-id 1
   %s excludes
+  %s override --email user@example.com --inbound-id 1 --factor 1.2
+  %s overrides
   %s disable --email user@example.com
   %s disable-all
   %s backup
@@ -1635,7 +1897,7 @@ Examples:
   %s doctor
   %s tick
   %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 func (a *App) printVersion(w io.Writer) {

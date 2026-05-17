@@ -2,6 +2,27 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.3.2-beta - Unreleased
+
+### Added
+
+- `override`, `remove-override`, and `overrides` commands for exact-client factor override policies.
+- Dedicated `xui_factor_overrides` metadata table using traffic id, inbound id, and email identity.
+- Status, doctor, cleanup, and audit support for override policy lifecycle.
+- v0.3.2-beta release notes.
+
+### Changed
+
+- Effective policy decisions now apply precedence as exclude, user override, single-user rule, inbound scope, global scope.
+- Active overrides replace broader scope factors for the exact client instead of stacking with them.
+- Status shows active override counts and policy lines, with scope `effective=` counts adjusted when overrides suppress scope factor ownership.
+
+### Safety
+
+- Enabling, updating, or removing an override refreshes matching active baselines from current counters.
+- Removing an override does not retroactively factor traffic that arrived while the override was active.
+- Cleanup can prune inactive override metadata after retention and never prunes active overrides.
+
 ## v0.3.1-beta - Unreleased
 
 ### Added

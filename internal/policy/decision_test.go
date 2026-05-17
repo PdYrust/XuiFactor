@@ -101,6 +101,62 @@ func TestExcludePolicyUsesFullClientIdentity(t *testing.T) {
 	}
 }
 
+func TestOverridePolicyWinsOverInboundScope(t *testing.T) {
+	target := candidate(1, 10, SourceInboundScope, 2_000_000)
+	decisions, err := Decide(append([]Candidate{target}, OverrideCandidatesForActiveTargets([]store.OverridePolicy{
+		{ID: 77, TrafficID: 1, InboundID: 1, Email: "user@example.com", FactorPPM: 1_200_000, State: store.StateActive},
+	}, []store.ActiveRuleClient{*target.Target})...))
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("decisions = %d, want 1", len(decisions))
+	}
+	decision := decisions[0]
+	if decision.SourceType != SourceUserOverride || decision.SourceRuleID != 77 || decision.FactorPPM != 1_200_000 {
+		t.Fatalf("decision = %#v, want override policy", decision)
+	}
+	if decision.Target == nil || decision.Target.Rule.FactorPPM != 1_200_000 {
+		t.Fatalf("decision target = %#v, want override factor target", decision.Target)
+	}
+	if len(decision.Suppressed) != 0 {
+		t.Fatalf("suppressed = %d, want no duplicate suppression for shared materialized target", len(decision.Suppressed))
+	}
+}
+
+func TestExcludeWinsOverOverride(t *testing.T) {
+	target := candidate(1, 10, SourceInboundScope, 2_000_000)
+	candidates := []Candidate{target}
+	candidates = append(candidates, OverrideCandidatesForActiveTargets([]store.OverridePolicy{
+		{ID: 77, TrafficID: 1, InboundID: 1, Email: "user@example.com", FactorPPM: 1_200_000, State: store.StateActive},
+	}, []store.ActiveRuleClient{*target.Target})...)
+	candidates = append(candidates, ExcludeCandidatesForActiveTargets([]store.ExcludePolicy{
+		{ID: 88, TrafficID: 1, InboundID: 1, Email: "user@example.com", State: store.StateActive},
+	}, []store.ActiveRuleClient{*target.Target})...)
+	decisions, err := Decide(candidates)
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	decision := decisions[0]
+	if decision.SourceType != SourceExclude || decision.Target != nil || decision.FactorPPM != 0 {
+		t.Fatalf("decision = %#v, want exclude no-factor decision", decision)
+	}
+	if len(decision.Suppressed) != 1 {
+		t.Fatalf("suppressed = %d, want one materialized target", len(decision.Suppressed))
+	}
+}
+
+func TestOverridePolicyUsesFullClientIdentity(t *testing.T) {
+	target := candidate(1, 10, SourceInboundScope, 2_000_000)
+	candidates := OverrideCandidatesForActiveTargets([]store.OverridePolicy{
+		{ID: 77, TrafficID: 1, InboundID: 1, Email: "other@example.com", FactorPPM: 1_200_000, State: store.StateActive},
+		{ID: 78, TrafficID: 2, InboundID: 1, Email: "user@example.com", FactorPPM: 1_200_000, State: store.StateActive},
+	}, []store.ActiveRuleClient{*target.Target})
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want no identity mismatch candidates", candidates)
+	}
+}
+
 func TestAmbiguousSamePrecedenceTargetsFailSafely(t *testing.T) {
 	_, err := Decide([]Candidate{
 		candidate(1, 10, SourceInboundScope, 2_000_000),

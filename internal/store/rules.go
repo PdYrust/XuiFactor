@@ -211,6 +211,10 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 	if err != nil {
 		return nil, err
 	}
+	overridesReady, err := s.tableExists(ctx, "xui_factor_overrides")
+	if err != nil {
+		return nil, err
+	}
 	baseValidity := `
 				rc.missing_since IS NULL
 					AND ct.id IS NOT NULL
@@ -241,6 +245,18 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 							AND ex.inbound_id = rc.inbound_id
 							AND ex.email = rc.email
 							AND ex.state = ?
+					)`
+		args = append(args, StateActive)
+	}
+	if overridesReady {
+		effectiveValidity += `
+					AND NOT EXISTS (
+						SELECT 1
+						FROM xui_factor_overrides ov
+						WHERE ov.traffic_id = rc.traffic_id
+							AND ov.inbound_id = rc.inbound_id
+							AND ov.email = rc.email
+							AND ov.state = ?
 					)`
 		args = append(args, StateActive)
 	}

@@ -116,6 +116,47 @@ func ExcludeCandidatesForActiveTargets(excludes []store.ExcludePolicy, targets [
 	return candidates
 }
 
+func OverrideCandidatesForActiveTargets(overrides []store.OverridePolicy, targets []store.ActiveRuleClient) []Candidate {
+	type targetKey struct {
+		trafficID int64
+		inboundID int64
+		email     string
+	}
+	targetsByKey := make(map[targetKey]store.ActiveRuleClient, len(targets))
+	for _, target := range targets {
+		targetsByKey[targetKey{
+			trafficID: target.Client.TrafficID,
+			inboundID: target.Client.InboundID,
+			email:     target.Client.Email,
+		}] = target
+	}
+
+	candidates := make([]Candidate, 0, len(overrides))
+	for _, override := range overrides {
+		key := targetKey{
+			trafficID: override.TrafficID,
+			inboundID: override.InboundID,
+			email:     override.Email,
+		}
+		target, ok := targetsByKey[key]
+		if !ok {
+			continue
+		}
+		target.Rule.FactorPPM = override.FactorPPM
+		candidates = append(candidates, Candidate{
+			Target:     &target,
+			SourceType: SourceUserOverride,
+			RuleID:     override.ID,
+			TrafficID:  override.TrafficID,
+			InboundID:  override.InboundID,
+			Email:      override.Email,
+			FactorPPM:  override.FactorPPM,
+			Reason:     "user override policy",
+		})
+	}
+	return candidates
+}
+
 func Decide(candidates []Candidate) ([]Decision, error) {
 	groups := make(map[int64][]Candidate)
 	for _, candidate := range candidates {
@@ -156,6 +197,7 @@ func decideOne(trafficID int64, candidates []Candidate) (Decision, error) {
 
 	matches := make([]Match, 0, len(candidates))
 	suppressed := make([]store.ActiveRuleClient, 0, len(candidates)-1)
+	suppressedKeys := make(map[materializedTargetKey]struct{}, len(candidates)-1)
 	for i, candidate := range candidates {
 		matches = append(matches, Match{
 			SourceType: candidate.SourceType,
@@ -165,7 +207,12 @@ func decideOne(trafficID int64, candidates []Candidate) (Decision, error) {
 			FactorPPM:  candidate.FactorPPM,
 			Reason:     candidate.Reason,
 		})
-		if i > 0 && candidate.Target != nil {
+		if i > 0 && candidate.Target != nil && !sameMaterializedTarget(winner.Target, candidate.Target) {
+			key := materializedKey(candidate.Target)
+			if _, ok := suppressedKeys[key]; ok {
+				continue
+			}
+			suppressedKeys[key] = struct{}{}
 			suppressed = append(suppressed, *candidate.Target)
 		}
 	}
@@ -182,6 +229,25 @@ func decideOne(trafficID int64, candidates []Candidate) (Decision, error) {
 		Reason:       winner.Reason,
 		Suppressed:   suppressed,
 	}, nil
+}
+
+type materializedTargetKey struct {
+	ruleID    int64
+	trafficID int64
+}
+
+func sameMaterializedTarget(left, right *store.ActiveRuleClient) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return materializedKey(left) == materializedKey(right)
+}
+
+func materializedKey(target *store.ActiveRuleClient) materializedTargetKey {
+	return materializedTargetKey{
+		ruleID:    target.Client.RuleID,
+		trafficID: target.Client.TrafficID,
+	}
 }
 
 func classifyTarget(target store.ActiveRuleClient) (SourceType, string) {

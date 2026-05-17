@@ -198,6 +198,117 @@ func TestCLIExcludeSmoke(t *testing.T) {
 	}
 }
 
+func TestCLIOverrideSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "override@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 2, 1, "scope@example.com", 400, 500, 900)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	if output := run("override", "--email", "override@example.com", "--inbound-id", "1", "--factor", "1.2", "--note", "custom"); !strings.Contains(output, "override: policy enabled") || !strings.Contains(output, "precedence: user override") {
+		t.Fatalf("expected override summary, got %q", output)
+	}
+	if output := run("overrides"); !strings.Contains(output, "email=override@example.com") || !strings.Contains(output, "factor=1.2") || !strings.Contains(output, "state=active") {
+		t.Fatalf("expected active overrides output, got %q", output)
+	}
+	if output := run("overrides", "--inbound-id", "1"); !strings.Contains(output, "email=override@example.com") || !strings.Contains(output, "inbound=1") {
+		t.Fatalf("expected inbound-filtered overrides output, got %q", output)
+	}
+	if output := run("status"); !strings.Contains(output, "overrides: 1") || !strings.Contains(output, "effective=1") || !strings.Contains(output, "override  email=override@example.com") {
+		t.Fatalf("expected status override output, got %q", output)
+	}
+	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	setCLITestCounters(t, dbPath, 2, 410, 520, 930)
+	if output := run("tick"); !strings.Contains(output, "active clients: 2") || !strings.Contains(output, "applied: 2") {
+		t.Fatalf("expected tick override output, got %q", output)
+	}
+	assertCLITestCounters(t, dbPath, 1, 112, 224, 336)
+	assertCLITestCounters(t, dbPath, 2, 420, 540, 960)
+	if output := run("remove-override", "--email", "override@example.com", "--inbound-id", "1"); !strings.Contains(output, "remove-override: policy disabled") {
+		t.Fatalf("expected remove-override summary, got %q", output)
+	}
+	if output := run("overrides", "--all"); !strings.Contains(output, "state=disabled") {
+		t.Fatalf("expected inactive overrides output, got %q", output)
+	}
+	if output := run("audit"); !strings.Contains(output, "override_enabled") || !strings.Contains(output, "override_disabled") {
+		t.Fatalf("expected override audit events, got %q", output)
+	}
+}
+
+func TestCLIExcludeWinsOverOverrideSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "policy@example.com", 100, 200, 300)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	run("exclude", "--email", "policy@example.com", "--inbound-id", "1")
+	run("override", "--email", "policy@example.com", "--inbound-id", "1", "--factor", "1.2")
+	if output := run("status"); !strings.Contains(output, "excludes: 1") || !strings.Contains(output, "overrides: 1") || !strings.Contains(output, "effective clients: 0") {
+		t.Fatalf("expected exclude to win in status, got %q", output)
+	}
+	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	if output := run("tick"); !strings.Contains(output, "active clients: 0") || !strings.Contains(output, "applied: 0") {
+		t.Fatalf("expected exclude to suppress override in tick, got %q", output)
+	}
+	assertCLITestCounters(t, dbPath, 1, 110, 220, 330)
+}
+
+func TestCLIDoctorReportsOverrideCounts(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "x-ui.db")
+	backupDir := filepath.Join(dir, "backups")
+	configPath := filepath.Join(dir, "config.json")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "override@example.com", 100, 200, 300)
+	writeCLITestConfig(t, configPath, dbPath, backupDir)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--config", configPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	run("override", "--email", "override@example.com", "--inbound-id", "1", "--factor", "1.2")
+	output := run("doctor")
+	if !strings.Contains(output, "active overrides: 1") || !strings.Contains(output, "inactive overrides: 0") {
+		t.Fatalf("expected doctor override counts, got %q", output)
+	}
+}
+
 func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
