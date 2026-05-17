@@ -75,6 +75,12 @@ func (a *App) Run(args []string) int {
 		return a.runEnable(ctx, common, args[1:])
 	case "enable-all":
 		return a.runEnableAll(ctx, common, args[1:])
+	case "exclude":
+		return a.runExclude(ctx, common, args[1:])
+	case "unexclude":
+		return a.runUnexclude(ctx, common, args[1:])
+	case "excludes":
+		return a.runExcludes(ctx, common, args[1:])
 	case "disable":
 		return a.runDisable(ctx, common, args[1:])
 	case "disable-all":
@@ -242,6 +248,14 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 		if persistentScopes > 0 && service.Active != "yes" {
 			warnings = append(warnings, "persistent scopes exist but future client auto-enrollment requires xui-factor.service")
 		}
+		excludeCounts, err := st.CountExcludes(ctx)
+		if err != nil {
+			a.printError(err)
+			return 1
+		}
+		out.Section("Policies")
+		out.Field("active excludes", excludeCounts.Active)
+		out.Field("inactive excludes", excludeCounts.Inactive)
 	} else {
 		warnings = append(warnings, "rules unavailable: metadata tables are missing")
 	}
@@ -300,17 +314,28 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 	for _, rule := range rules {
 		if rule.State == store.StateActive {
 			activeRules++
-			effectiveClients += rule.ClientCount
+			effectiveClients += rule.EffectiveClientCount
 		}
 		if rule.State == store.StatePaused {
 			pausedRules++
 		}
+	}
+	excludeCounts, err := st.CountExcludes(ctx)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	excludes, err := svc.Excludes(ctx, engine.ExcludeListRequest{IncludeInactive: includeDisabled})
+	if err != nil {
+		a.printError(err)
+		return 1
 	}
 
 	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
 	out.Section("Status")
 	out.Field("active rules", activeRules)
 	out.Field("paused rules", pausedRules)
+	out.Field("excludes", excludeCounts.Active)
 	out.Field("effective clients", effectiveClients)
 
 	scopes := make([]store.Rule, 0)
@@ -332,6 +357,12 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		out.Section("Rules")
 		for _, rule := range singles {
 			out.Rule(rule)
+		}
+	}
+	if len(excludes) > 0 {
+		out.Section("Policies")
+		for _, policy := range excludes {
+			out.Exclude(policy)
 		}
 	}
 	service := systemdServiceState()
@@ -430,6 +461,111 @@ func (a *App) runEnableAll(ctx context.Context, opts commonOptions, args []strin
 	out.Field("skipped", result.SkippedExisting)
 	out.Field("conflicts", result.Conflicts)
 	out.Field("missing", result.Missing)
+	return 0
+}
+
+func (a *App) runExclude(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseExcludeArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, _, err := a.openService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	policy, err := svc.Exclude(ctx, engine.ExcludeRequest{
+		Email:     flags.email,
+		InboundID: flags.inboundID,
+		Note:      flags.note,
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status")
+			return commandErrorCode(err)
+		}
+		a.printError(err)
+		return commandErrorCode(err)
+	}
+	out := newOutput(a.Out)
+	out.Summary("exclude", "policy enabled")
+	out.Section("Target")
+	out.Field("email", policy.Email)
+	out.Field("inbound", policy.InboundID)
+	out.Field("traffic", policy.TrafficID)
+	out.Section("Policy")
+	out.Field("action", "no factor")
+	out.Field("precedence", "exclude")
+	out.Section("Result")
+	out.Field("status", policy.State)
+	return 0
+}
+
+func (a *App) runUnexclude(ctx context.Context, opts commonOptions, args []string) int {
+	selector, err := parseExcludeSelectorArgs(args, "unexclude")
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, _, err := a.openService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	policy, err := svc.Unexclude(ctx, engine.ExcludeSelector{
+		Email:     selector.email,
+		InboundID: selector.inboundID,
+	})
+	if err != nil {
+		a.printError(err)
+		return commandErrorCode(err)
+	}
+	out := newOutput(a.Out)
+	out.Summary("unexclude", "policy disabled")
+	out.Section("Target")
+	out.Field("email", policy.Email)
+	out.Field("inbound", policy.InboundID)
+	out.Field("traffic", policy.TrafficID)
+	out.Section("Result")
+	out.Field("future traffic", "follows matching rules and scopes")
+	return 0
+}
+
+func (a *App) runExcludes(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseExcludesArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, err := a.openReadOnlyService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	policies, err := svc.Excludes(ctx, engine.ExcludeListRequest{
+		InboundID:       flags.inboundID,
+		IncludeInactive: flags.includeInactive,
+	})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	out := newOutput(a.Out)
+	out.Title("Excludes")
+	if len(policies) == 0 {
+		out.Field("entries", 0)
+		return 0
+	}
+	for _, policy := range policies {
+		out.Exclude(policy)
+	}
 	return 0
 }
 
@@ -690,6 +826,7 @@ func (a *App) runCleanup(ctx context.Context, opts commonOptions, args []string)
 	out.Field("missing clients pruned", result.MissingClientsPruned)
 	out.Field("disabled rules pruned", result.DisabledRulesPruned)
 	out.Field("disabled scopes pruned", result.DisabledScopesPruned)
+	out.Field("inactive excludes pruned", result.InactiveExcludesPruned)
 	out.Field("audit events pruned", result.AuditEventsPruned)
 	out.Field("vacuum run", yesNo(result.VacuumRun))
 	return 0
@@ -1003,6 +1140,17 @@ type enableAllFlags struct {
 	name                   string
 }
 
+type excludeFlags struct {
+	email     string
+	inboundID *int64
+	note      string
+}
+
+type excludesFlags struct {
+	inboundID       *int64
+	includeInactive bool
+}
+
 type cleanupFlags struct {
 	dryRun    bool
 	olderThan time.Duration
@@ -1128,6 +1276,98 @@ func parseEnableAllArgs(args []string) (enableAllFlags, error) {
 	}
 	if strings.TrimSpace(flags.factor) == "" {
 		return flags, errors.New("enable-all: --factor is required")
+	}
+	return flags, nil
+}
+
+func parseExcludeArgs(args []string) (excludeFlags, error) {
+	flags, err := parseExcludeSelectorArgs(args, "exclude")
+	if err != nil {
+		return flags, err
+	}
+	return flags, nil
+}
+
+func parseExcludeSelectorArgs(args []string, command string) (excludeFlags, error) {
+	var flags excludeFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--email":
+			value, next, err := readFlagValue(args, i, "--email")
+			if err != nil {
+				return flags, err
+			}
+			flags.email = value
+			i = next
+		case strings.HasPrefix(arg, "--email="):
+			flags.email = strings.TrimPrefix(arg, "--email=")
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		case arg == "--note" && command == "exclude":
+			value, next, err := readFlagValue(args, i, "--note")
+			if err != nil {
+				return flags, err
+			}
+			flags.note = value
+			i = next
+		case strings.HasPrefix(arg, "--note=") && command == "exclude":
+			flags.note = strings.TrimPrefix(arg, "--note=")
+		default:
+			return flags, fmt.Errorf("%s: unknown argument %q", command, arg)
+		}
+	}
+	if strings.TrimSpace(flags.email) == "" {
+		return flags, fmt.Errorf("%s: --email is required", command)
+	}
+	if flags.inboundID == nil {
+		return flags, fmt.Errorf("%s: --inbound-id is required", command)
+	}
+	return flags, nil
+}
+
+func parseExcludesArgs(args []string) (excludesFlags, error) {
+	var flags excludesFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--all":
+			flags.includeInactive = true
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		default:
+			return flags, fmt.Errorf("excludes: unknown argument %q", arg)
+		}
 	}
 	return flags, nil
 }
@@ -1358,6 +1598,9 @@ Commands:
   status     List effective active and paused rules
   enable     Enable a factor rule
   enable-all Enable factor rules for selected clients
+  exclude    Exclude one client from factor decisions
+  unexclude  Disable an exclude policy
+  excludes   List exclude policies
   disable    Disable a rule and keep existing results
   disable-all Disable active and paused rules
   pause      Pause a rule without changing counters
@@ -1382,6 +1625,8 @@ Examples:
   %s enable-all --factor 1.2
   %s enable-all --factor 1.2 --limited-only
   %s enable-all --factor 1.2 --once
+  %s exclude --email user@example.com --inbound-id 1
+  %s excludes
   %s disable --email user@example.com
   %s disable-all
   %s backup
@@ -1390,7 +1635,7 @@ Examples:
   %s doctor
   %s tick
   %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 func (a *App) printVersion(w io.Writer) {

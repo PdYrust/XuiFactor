@@ -78,6 +78,44 @@ func DecideActiveRuleClients(targets []store.ActiveRuleClient) ([]Decision, erro
 	return Decide(ActiveRuleCandidates(targets))
 }
 
+func ExcludeCandidatesForActiveTargets(excludes []store.ExcludePolicy, targets []store.ActiveRuleClient) []Candidate {
+	type targetKey struct {
+		trafficID int64
+		inboundID int64
+		email     string
+	}
+	targetKeys := make(map[targetKey]struct{}, len(targets))
+	for _, target := range targets {
+		targetKeys[targetKey{
+			trafficID: target.Client.TrafficID,
+			inboundID: target.Client.InboundID,
+			email:     target.Client.Email,
+		}] = struct{}{}
+	}
+
+	candidates := make([]Candidate, 0, len(excludes))
+	for _, exclude := range excludes {
+		key := targetKey{
+			trafficID: exclude.TrafficID,
+			inboundID: exclude.InboundID,
+			email:     exclude.Email,
+		}
+		if _, ok := targetKeys[key]; !ok {
+			continue
+		}
+		candidates = append(candidates, Candidate{
+			SourceType: SourceExclude,
+			RuleID:     exclude.ID,
+			TrafficID:  exclude.TrafficID,
+			InboundID:  exclude.InboundID,
+			Email:      exclude.Email,
+			FactorPPM:  0,
+			Reason:     "exclude policy",
+		})
+	}
+	return candidates
+}
+
 func Decide(candidates []Candidate) ([]Decision, error) {
 	groups := make(map[int64][]Candidate)
 	for _, candidate := range candidates {

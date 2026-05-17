@@ -295,6 +295,96 @@ func TestInboundScopeDoesNotEnrollDifferentInbound(t *testing.T) {
 	}
 }
 
+func TestExcludedClientReceivesNoFactorWhenInboundScopeMatches(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{
+		{id: 1, inboundID: 1, email: "excluded@example.com", up: 100, down: 200, allTime: 300},
+		{id: 2, inboundID: 1, email: "active@example.com", up: 400, down: 500, allTime: 900},
+	})
+	defer h.store.Close()
+
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "excluded@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 2, 410, 520, 930)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.ActiveClients != 1 || result.Applied != 1 {
+		t.Fatalf("result = %#v, want one effective applied client", result)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertCounters(t, h.dbPath, 2, 420, 540, 960)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 420, lastDown: 540, lastAllTime: 960})
+}
+
+func TestExcludedClientReceivesNoFactorWhenGlobalScopeMatches(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "excluded@example.com", up: 100, down: 200, allTime: 300}})
+	defer h.store.Close()
+
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "excluded@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 110, 220, 330)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.ActiveClients != 0 || result.Applied != 0 {
+		t.Fatalf("result = %#v, want no effective factor clients", result)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
+}
+
+func TestUnexcludeResumesFromCurrentBaselineWithoutRetroactiveFactor(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	defer h.store.Close()
+
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	if _, err := h.runner.Tick(ctx); err != nil {
+		t.Fatalf("excluded tick: %v", err)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
+
+	if _, err := h.engine.Unexclude(ctx, engine.ExcludeSelector{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("unexclude: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 120, 240, 360)
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick after unexclude: %v", err)
+	}
+	if result.Applied != 1 {
+		t.Fatalf("applied = %d, want 1", result.Applied)
+	}
+	assertCounters(t, h.dbPath, 1, 130, 260, 390)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 130, lastDown: 260, lastAllTime: 390})
+}
+
 func TestLimitedOnlyScopeExcludesFutureUnlimitedClients(t *testing.T) {
 	ctx := context.Background()
 	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "limited@example.com", up: 100, down: 200, allTime: 300}})

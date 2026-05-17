@@ -148,6 +148,56 @@ func TestCLIEnableAllOnceSmoke(t *testing.T) {
 	}
 }
 
+func TestCLIExcludeSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "excluded@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 2, 1, "active@example.com", 400, 500, 900)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	if output := run("exclude", "--email", "excluded@example.com", "--inbound-id", "1", "--note", "skip"); !strings.Contains(output, "exclude: policy enabled") || !strings.Contains(output, "precedence: exclude") {
+		t.Fatalf("expected exclude summary, got %q", output)
+	}
+	if output := run("excludes"); !strings.Contains(output, "email=excluded@example.com") || !strings.Contains(output, "state=active") {
+		t.Fatalf("expected active excludes output, got %q", output)
+	}
+	if output := run("excludes", "--inbound-id", "1"); !strings.Contains(output, "email=excluded@example.com") || !strings.Contains(output, "inbound=1") {
+		t.Fatalf("expected inbound-filtered excludes output, got %q", output)
+	}
+	if output := run("status"); !strings.Contains(output, "excludes: 1") || !strings.Contains(output, "effective=1") || !strings.Contains(output, "Policies") {
+		t.Fatalf("expected status exclude output, got %q", output)
+	}
+	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	setCLITestCounters(t, dbPath, 2, 410, 520, 930)
+	if output := run("tick"); !strings.Contains(output, "active clients: 1") || !strings.Contains(output, "applied: 1") {
+		t.Fatalf("expected tick exclude output, got %q", output)
+	}
+	assertCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	assertCLITestCounters(t, dbPath, 2, 420, 540, 960)
+	if output := run("unexclude", "--email", "excluded@example.com", "--inbound-id", "1"); !strings.Contains(output, "unexclude: policy disabled") {
+		t.Fatalf("expected unexclude summary, got %q", output)
+	}
+	if output := run("excludes", "--all"); !strings.Contains(output, "state=disabled") {
+		t.Fatalf("expected inactive excludes output, got %q", output)
+	}
+	if output := run("audit"); !strings.Contains(output, "exclude_enabled") || !strings.Contains(output, "exclude_disabled") {
+		t.Fatalf("expected exclude audit events, got %q", output)
+	}
+}
+
 func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
@@ -752,6 +802,19 @@ func setCLITestCounters(t *testing.T, dbPath string, id, up, down, allTime int64
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
 	execCLITestSQL(t, db, `UPDATE client_traffics SET up=?, down=?, all_time=? WHERE id=?`, up, down, allTime, id)
+}
+
+func assertCLITestCounters(t *testing.T, dbPath string, id, wantUp, wantDown, wantAllTime int64) {
+	t.Helper()
+	db := openCLITestDB(t, dbPath)
+	defer db.Close()
+	var up, down, allTime int64
+	if err := db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=?`, id).Scan(&up, &down, &allTime); err != nil {
+		t.Fatalf("read counters: %v", err)
+	}
+	if up != wantUp || down != wantDown || allTime != wantAllTime {
+		t.Fatalf("traffic %d counters = up=%d down=%d all_time=%d, want up=%d down=%d all_time=%d", id, up, down, allTime, wantUp, wantDown, wantAllTime)
+	}
 }
 
 func cliMetadataTableExists(t *testing.T, dbPath, table string) bool {

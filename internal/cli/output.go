@@ -39,12 +39,17 @@ func (o output) Rule(rule store.Rule) {
 		name = "  name=" + rule.Name
 	}
 	if rule.Scope != nil {
-		fmt.Fprintf(o.w, "  rule=%d  state=%s  scope=%s  factor=%s  clients=%d%s\n",
+		effective := ""
+		if rule.EffectiveClientCount != rule.ClientCount {
+			effective = fmt.Sprintf("  effective=%d", rule.EffectiveClientCount)
+		}
+		fmt.Fprintf(o.w, "  rule=%d  state=%s  scope=%s  factor=%s  clients=%d%s%s\n",
 			rule.ID,
 			rule.State,
 			scopeLabel(rule.Scope),
 			engine.FormatFactor(rule.FactorPPM),
 			rule.ClientCount,
+			effective,
 			name,
 		)
 		return
@@ -57,6 +62,20 @@ func (o output) Rule(rule store.Rule) {
 		engine.FormatFactor(rule.FactorPPM),
 		rule.ClientCount,
 		name,
+	)
+}
+
+func (o output) Exclude(policy store.ExcludePolicy) {
+	note := ""
+	if policy.Note != "" {
+		note = "  note=" + policy.Note
+	}
+	fmt.Fprintf(o.w, "  exclude  email=%s  inbound=%d  traffic=%d  state=%s%s\n",
+		policy.Email,
+		policy.InboundID,
+		policy.TrafficID,
+		policy.State,
+		note,
 	)
 }
 

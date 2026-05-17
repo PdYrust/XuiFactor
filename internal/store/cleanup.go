@@ -120,6 +120,12 @@ func (tx *Tx) Cleanup(ctx context.Context, opts CleanupOptions) (CleanupResult, 
 	result.DisabledRulesPruned = prunedRules
 	result.DisabledScopesPruned = prunedScopes
 
+	inactiveExcludes, err := tx.pruneInactiveExcludes(ctx, disabledCutoff, opts.Now, opts.DryRun)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	result.InactiveExcludesPruned = inactiveExcludes
+
 	auditCutoff := opts.Now - opts.AuditRetention
 	auditEvents, err := tx.pruneAuditEvents(ctx, auditCutoff, opts.DryRun)
 	if err != nil {
@@ -292,6 +298,46 @@ func (tx *Tx) pruneDisabledRules(ctx context.Context, cutoff, now int64, dryRun 
 		}
 	}
 	return rules, scopes, nil
+}
+
+func (tx *Tx) pruneInactiveExcludes(ctx context.Context, cutoff, now int64, dryRun bool) (int, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id
+		FROM xui_factor_excludes
+		WHERE state <> ?
+			AND COALESCE(disabled_at, updated_at) <= ?
+		ORDER BY id
+	`, StateActive, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if dryRun || len(ids) == 0 {
+		return len(ids), nil
+	}
+
+	for _, id := range ids {
+		message := fmt.Sprintf("exclude policy %d metadata pruned", id)
+		if err := tx.AddEvent(ctx, nil, EventCleanup, message, now); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM xui_factor_excludes WHERE id = ?`, id); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
 }
 
 func (tx *Tx) pruneAuditEvents(ctx context.Context, cutoff int64, dryRun bool) (int, error) {

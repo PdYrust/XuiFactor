@@ -408,6 +408,7 @@ func scanRuleRowsWithCountAndScope(rows *sql.Rows) (Rule, error) {
 		&pausedAt,
 		&disabledAt,
 		&rule.ClientCount,
+		&rule.EffectiveClientCount,
 		&scopeRuleID,
 		&scopeInboundID,
 		&limitedOnly,
