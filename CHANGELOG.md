@@ -2,6 +2,26 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.3.5-beta - Unreleased
+
+### Added
+
+- Migration hardening tests for representative older beta metadata schemas.
+- Broad CLI smoke coverage across major operator commands before the stable release.
+- v0.3.5-beta release notes.
+
+### Changed
+
+- Normal `status` now reports active scopes, active single-user rules, and effective factored clients directly.
+- Metadata migration now adds missing columns before creating dependent indexes.
+- Metadata migration backfills materialized client inbound and email identity from current 3x-ui rows or rule metadata when upgrading older schemas.
+
+### Safety
+
+- Repeated migrations are no-ops and preserve existing XuiFactor metadata.
+- Migration hardening does not modify `client_traffics` counters.
+- Read-only command smoke coverage now exercises status, explain, report, audit, doctor, and client status paths.
+
 ## v0.3.4-beta - Unreleased
 
 ### Added

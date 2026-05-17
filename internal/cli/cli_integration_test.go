@@ -270,7 +270,7 @@ func TestCLIExcludeWinsOverOverrideSmoke(t *testing.T) {
 	run("enable-all", "--inbound-id", "1", "--factor", "2")
 	run("exclude", "--email", "policy@example.com", "--inbound-id", "1")
 	run("override", "--email", "policy@example.com", "--inbound-id", "1", "--factor", "1.2")
-	if output := run("status"); !strings.Contains(output, "excludes: 1") || !strings.Contains(output, "overrides: 1") || !strings.Contains(output, "effective clients: 0") {
+	if output := run("status"); !strings.Contains(output, "excludes: 1") || !strings.Contains(output, "overrides: 1") || !strings.Contains(output, "effective factored clients: 0") {
 		t.Fatalf("expected exclude to win in status, got %q", output)
 	}
 	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
@@ -441,6 +441,79 @@ func TestCLIReportAndAuditFiltersSmoke(t *testing.T) {
 	}
 }
 
+func TestCLIFinalBetaMajorCommandsSmoke(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "x-ui.db")
+	backupDir := filepath.Join(dir, "backups")
+	configPath := filepath.Join(dir, "config.json")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "alpha@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 2, 1, "beta@example.com", 400, 500, 900)
+	writeCLITestConfig(t, configPath, dbPath, backupDir)
+	withMockDoctorService(t, "enabled", "active", true)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--config", configPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	if code := app.Run([]string{"--help"}); code != 0 || !strings.Contains(out.String(), "Commands") {
+		t.Fatalf("help failed: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := app.Run([]string{"--version"}); code != 0 || !strings.Contains(out.String(), "XuiFactor") {
+		t.Fatalf("version failed: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+
+	if output := run("doctor"); !strings.Contains(output, "Doctor") || !strings.Contains(output, "Service") {
+		t.Fatalf("doctor output not polished enough: %q", output)
+	}
+	run("enable", "--email", "alpha@example.com", "--inbound-id", "1", "--factor", "2")
+	if output := run("status"); !strings.Contains(output, "active single-user rules: 1") || !strings.Contains(output, "effective factored clients: 1") {
+		t.Fatalf("status output missing effective summary: %q", output)
+	}
+	run("pause", "--email", "alpha@example.com", "--inbound-id", "1")
+	run("resume", "--email", "alpha@example.com", "--inbound-id", "1")
+	setCLITestCounters(t, dbPath, 1, 150, 250, 400)
+	run("tick")
+	run("explain", "--email", "alpha@example.com", "--inbound-id", "1")
+	run("audit", "--limit", "5")
+	run("audit", "--event", "tick")
+	run("audit", "--since", "24h")
+	run("report")
+	run("backup")
+	run("disable", "--email", "alpha@example.com", "--inbound-id", "1")
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	run("exclude", "--email", "beta@example.com", "--inbound-id", "1")
+	run("excludes")
+	run("unexclude", "--email", "beta@example.com", "--inbound-id", "1")
+	run("excludes", "--all")
+	run("override", "--email", "beta@example.com", "--inbound-id", "1", "--factor", "1.2")
+	run("overrides")
+	run("remove-override", "--email", "beta@example.com", "--inbound-id", "1")
+	run("overrides", "--all")
+	run("status", "--effective")
+	run("status", "--clients", "--inbound-id", "1")
+	run("status", "--all")
+	run("report", "--inbound-id", "1")
+	run("report", "--all")
+	run("pause-all", "--inbound-id", "1")
+	run("resume-all", "--inbound-id", "1")
+	run("reconcile", "--dry-run")
+	run("cleanup", "--dry-run")
+	run("disable-all", "--inbound-id", "1")
+}
+
 func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
@@ -547,7 +620,7 @@ func TestCLIReconcileSmoke(t *testing.T) {
 	if output := run("reconcile"); !strings.Contains(output, "reconciled: 1") {
 		t.Fatalf("expected reconcile summary, got %q", output)
 	}
-	if output := run("status"); !strings.Contains(output, "active rules: 0") {
+	if output := run("status"); !strings.Contains(output, "active scopes: 0") || !strings.Contains(output, "active single-user rules: 0") {
 		t.Fatalf("expected clean normal status, got %q", output)
 	}
 	if output := run("status", "--all"); !strings.Contains(output, "state=orphaned") {

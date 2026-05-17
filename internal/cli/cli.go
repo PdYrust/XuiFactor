@@ -315,9 +315,12 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 	if !metadataReady {
 		out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
 		out.Section("Status")
-		out.Field("active rules", 0)
+		out.Field("active scopes", 0)
+		out.Field("active single-user rules", 0)
 		out.Field("paused rules", 0)
-		out.Field("effective clients", 0)
+		out.Field("excludes", 0)
+		out.Field("overrides", 0)
+		out.Field("effective factored clients", 0)
 		return 0
 	}
 
@@ -326,34 +329,26 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
-	activeRules := 0
+	activeScopes := 0
+	activeSingles := 0
 	pausedRules := 0
-	effectiveClients := int64(0)
 	for _, rule := range rules {
 		if rule.State == store.StateActive {
-			activeRules++
-			effectiveClients += rule.EffectiveClientCount
+			if rule.Scope != nil {
+				activeScopes++
+			} else {
+				activeSingles++
+			}
 		}
 		if rule.State == store.StatePaused {
 			pausedRules++
 		}
 	}
-	excludeCounts, err := st.CountExcludes(ctx)
+	effective, err := svc.EffectiveStatus(ctx, engine.EffectiveStatusRequest{})
 	if err != nil {
 		a.printError(err)
 		return 1
 	}
-	overrideCounts, err := st.CountOverrides(ctx)
-	if err != nil {
-		a.printError(err)
-		return 1
-	}
-	effectiveOverrides, err := st.CountEffectiveOverrides(ctx)
-	if err != nil {
-		a.printError(err)
-		return 1
-	}
-	effectiveClients += effectiveOverrides
 	excludes, err := svc.Excludes(ctx, engine.ExcludeListRequest{IncludeInactive: flags.includeDisabled})
 	if err != nil {
 		a.printError(err)
@@ -367,11 +362,12 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 
 	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
 	out.Section("Status")
-	out.Field("active rules", activeRules)
+	out.Field("active scopes", activeScopes)
+	out.Field("active single-user rules", activeSingles)
 	out.Field("paused rules", pausedRules)
-	out.Field("excludes", excludeCounts.Active)
-	out.Field("overrides", overrideCounts.Active)
-	out.Field("effective clients", effectiveClients)
+	out.Field("excludes", len(effective.Excludes))
+	out.Field("overrides", len(effective.Overrides))
+	out.Field("effective factored clients", effective.EffectiveFactoredClients)
 
 	scopes := make([]store.Rule, 0)
 	singles := make([]store.Rule, 0)

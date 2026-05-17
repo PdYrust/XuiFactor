@@ -218,9 +218,45 @@ func (s *Store) tableColumns(ctx context.Context, table string) (map[string]bool
 	return columns, nil
 }
 
+func (tx *Tx) tableColumns(ctx context.Context, table string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return nil, wrapSQLiteError("read table columns", err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return nil, wrapSQLiteError("read table columns", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapSQLiteError("read table columns", err)
+	}
+	return columns, nil
+}
+
 func (s *Store) Migrate(ctx context.Context) error {
 	return s.WithImmediateTx(ctx, func(tx *Tx) error {
-		for _, stmt := range migrationStatements {
+		for _, stmt := range migrationTableStatements {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("run metadata migration: %w", err)
+			}
+		}
+		if err := tx.ensureMetadataColumns(ctx); err != nil {
+			return fmt.Errorf("run metadata migration: %w", err)
+		}
+		if err := tx.backfillMetadataIdentity(ctx); err != nil {
+			return fmt.Errorf("run metadata migration: %w", err)
+		}
+		for _, stmt := range migrationIndexStatements {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return fmt.Errorf("run metadata migration: %w", err)
 			}
@@ -235,6 +271,65 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 		return nil
 	})
+}
+
+func (tx *Tx) ensureMetadataColumns(ctx context.Context) error {
+	for table, columns := range migrationColumns {
+		exists, err := tx.TableExists(ctx, table)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		current, err := tx.tableColumns(ctx, table)
+		if err != nil {
+			return err
+		}
+		for _, column := range columns {
+			if current[column.name] {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (tx *Tx) backfillMetadataIdentity(ctx context.Context) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_rule_clients
+		SET inbound_id = COALESCE(
+				(SELECT ct.inbound_id FROM client_traffics ct WHERE ct.id = xui_factor_rule_clients.traffic_id LIMIT 1),
+				(SELECT r.inbound_id FROM xui_factor_rules r WHERE r.id = xui_factor_rule_clients.rule_id LIMIT 1),
+				inbound_id
+			)
+		WHERE inbound_id = 0
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_rule_clients
+		SET email = COALESCE(
+				(SELECT ct.email FROM client_traffics ct WHERE ct.id = xui_factor_rule_clients.traffic_id LIMIT 1),
+				(SELECT r.email FROM xui_factor_rules r WHERE r.id = xui_factor_rule_clients.rule_id LIMIT 1),
+				email
+			)
+		WHERE email = ''
+	`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_rule_clients
+		SET updated_at = COALESCE(
+				(SELECT r.updated_at FROM xui_factor_rules r WHERE r.id = xui_factor_rule_clients.rule_id LIMIT 1),
+				updated_at
+			)
+		WHERE updated_at = 0
+	`)
+	return err
 }
 
 func (s *Store) WithImmediateTx(ctx context.Context, fn func(*Tx) error) (err error) {

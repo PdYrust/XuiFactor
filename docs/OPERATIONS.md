@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.3.4-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.4-beta_linux_amd64
+tar -xzf xui-factor_v0.3.5-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.5-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -293,7 +293,7 @@ xui-factor status
 
 Normal status hides orphaned, merged, and ineffective legacy rules. Persistent scopes remain visible with their current materialized client count.
 
-Active excludes and overrides are shown as policies. Scope lines show an `effective=` count when policies reduce the number of clients that currently receive the scope factor.
+Normal status summarizes active scopes, active single-user rules, active policies, and effective factored clients. Active excludes and overrides are shown as policies. Scope lines show an `effective=` count when policies reduce the number of clients that currently receive the scope factor.
 
 Use `status --effective` to inspect grouped final decisions, and `status --clients --inbound-id ID` to inspect client-level effective factors without large unfiltered output.
 
