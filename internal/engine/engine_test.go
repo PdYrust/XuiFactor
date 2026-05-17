@@ -517,6 +517,138 @@ func TestEnableRejectsActiveTrafficConflict(t *testing.T) {
 	}
 }
 
+func TestReportSummarizesActivePoliciesAndEffectiveClients(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "free@example.com", up: 100, down: 200, allTime: 300},
+		{id: 2, inboundID: inboundID, email: "override@example.com", up: 400, down: 500, allTime: 900},
+		{id: 3, inboundID: inboundID, email: "scope@example.com", up: 1000, down: 2000, allTime: 3000},
+	})
+	defer st.Close()
+
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := svc.Exclude(ctx, ExcludeRequest{Email: "free@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "override@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+
+	report, err := svc.Report(ctx, ReportRequest{InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if !report.MetadataReady {
+		t.Fatalf("metadata ready = false")
+	}
+	if report.ActiveScopes != 1 || report.ActiveExcludes != 1 || report.ActiveOverrides != 1 || report.ActiveSingleUserRules != 0 {
+		t.Fatalf("policy counts = scopes=%d excludes=%d overrides=%d singles=%d", report.ActiveScopes, report.ActiveExcludes, report.ActiveOverrides, report.ActiveSingleUserRules)
+	}
+	if report.EffectiveFactoredClients != 2 || report.ExcludedClients != 1 || report.OverriddenClients != 1 || report.NoFactorClients != 0 {
+		t.Fatalf("effective counts = factored=%d excluded=%d overridden=%d none=%d", report.EffectiveFactoredClients, report.ExcludedClients, report.OverriddenClients, report.NoFactorClients)
+	}
+	if report.TotalActiveRuleClients != 3 {
+		t.Fatalf("active rule clients = %d, want 3", report.TotalActiveRuleClients)
+	}
+}
+
+func TestReportInboundFilterAndNoRules(t *testing.T) {
+	ctx := context.Background()
+	inboundOne := int64(1)
+	inboundTwo := int64(2)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundOne, email: "one@example.com", up: 100, down: 200, allTime: 300},
+		{id: 2, inboundID: inboundTwo, email: "two@example.com", up: 400, down: 500, allTime: 900},
+	})
+	defer st.Close()
+
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundOne, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	report, err := svc.Report(ctx, ReportRequest{InboundID: &inboundTwo})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if report.ActiveScopes != 0 || report.EffectiveFactoredClients != 0 || report.NoFactorClients != 1 {
+		t.Fatalf("inbound filtered report = scopes=%d factored=%d none=%d", report.ActiveScopes, report.EffectiveFactoredClients, report.NoFactorClients)
+	}
+}
+
+func TestReportIsReadOnlyAndDoesNotMutateCounters(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+
+	db := openTestDB(t, dbPath)
+	defer db.Close()
+	beforeEvents := countAllEngineEvents(t, db)
+	if _, err := svc.Report(ctx, ReportRequest{InboundID: &inboundID}); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	afterEvents := countAllEngineEvents(t, db)
+	if afterEvents != beforeEvents {
+		t.Fatalf("report created audit events: before=%d after=%d", beforeEvents, afterEvents)
+	}
+	var up, down, allTime int64
+	if err := db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=1`).Scan(&up, &down, &allTime); err != nil {
+		t.Fatalf("read counters: %v", err)
+	}
+	if up != 100 || down != 200 || allTime != 300 {
+		t.Fatalf("report changed counters: up=%d down=%d all_time=%d", up, down, allTime)
+	}
+}
+
+func TestAuditFiltersAndTrafficImpactAggregation(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	db := openTestDB(t, dbPath)
+	defer db.Close()
+	execEngineTestSQL(t, db, `
+		INSERT INTO xui_factor_events(rule_id, event_type, message, created_at)
+		VALUES(NULL, ?, 'override policy 7 enabled for traffic id 1 inbound 1 email user@example.com factor 1.2', ?)
+	`, store.EventOverrideEnable, int64(1_700_000_010))
+	execEngineTestSQL(t, db, `
+		INSERT INTO xui_factor_events(rule_id, event_type, message, created_at)
+		VALUES(1, ?, 'traffic id 1 inbound 1 email user@example.com extra_up=100 extra_down=50 extra_all_time=150', ?)
+	`, store.EventTrafficApply, int64(1_700_000_020))
+	execEngineTestSQL(t, db, `
+		INSERT INTO xui_factor_events(rule_id, event_type, message, created_at)
+		VALUES(NULL, ?, 'override policy 8 enabled for traffic id 2 inbound 2 email other@example.com factor 1.2', ?)
+	`, store.EventOverrideEnable, int64(1_699_999_000))
+
+	events, err := svc.Audit(ctx, AuditRequest{EventType: store.EventOverrideEnable, Email: "user@example.com", InboundID: &inboundID, Since: time.Hour, Limit: 10})
+	if err != nil {
+		t.Fatalf("audit: %v", err)
+	}
+	if len(events) != 1 || events[0].PolicyID == nil || *events[0].PolicyID != 7 {
+		t.Fatalf("filtered events = %#v, want policy 7", events)
+	}
+	impact, err := st.TrafficImpact(ctx, store.EventFilter{InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("traffic impact: %v", err)
+	}
+	if impact.Applications != 1 || impact.ExtraBytes != 150 || impact.LastAppliedAt == nil || *impact.LastAppliedAt != 1_700_000_020 {
+		t.Fatalf("impact = %#v, want one 150-byte application", impact)
+	}
+}
+
 type testTraffic struct {
 	id        int64
 	inboundID int64

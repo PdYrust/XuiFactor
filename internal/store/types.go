@@ -138,15 +138,28 @@ type OverrideCounts struct {
 type Event struct {
 	ID        int64
 	RuleID    *int64
+	PolicyID  *int64
 	EventType string
 	Message   string
 	CreatedAt int64
+	Email     string
+	InboundID *int64
 }
 
 type EventFilter struct {
 	Limit     int
+	EventType string
 	Email     string
 	InboundID *int64
+	RuleID    *int64
+	PolicyID  *int64
+	Since     *int64
+}
+
+type TrafficImpact struct {
+	ExtraBytes    int64
+	Applications  int
+	LastAppliedAt *int64
 }
 
 type ClientFilter struct {

@@ -369,6 +369,78 @@ func TestCLIStatusClientsWithoutInboundIsLimited(t *testing.T) {
 	}
 }
 
+func TestCLIReportAndAuditFiltersSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "free@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 2, 1, "override@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 3, 1, "scope@example.com", 1000, 2000, 3000)
+	withMockDoctorService(t, "enabled", "active", true)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	run("exclude", "--email", "free@example.com", "--inbound-id", "1")
+	run("override", "--email", "override@example.com", "--inbound-id", "1", "--factor", "1.2")
+	setCLITestCounters(t, dbPath, 2, 500, 600, 1100)
+	setCLITestCounters(t, dbPath, 3, 1200, 2300, 3500)
+	run("tick")
+
+	report := run("report")
+	for _, want := range []string{
+		"Report",
+		"service: yes",
+		"active scopes: 1",
+		"active excludes: 1",
+		"active overrides: 1",
+		"factored: 2",
+		"excluded: 1",
+		"tick applications:",
+	} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("report output missing %q: %q", want, report)
+		}
+	}
+	if output := run("report", "--inbound-id", "1"); !strings.Contains(output, "inbound: 1") || !strings.Contains(output, "active scopes: 1") {
+		t.Fatalf("expected inbound report, got %q", output)
+	}
+	if output := run("report", "--all"); !strings.Contains(output, "inactive excludes: 0") || !strings.Contains(output, "inactive overrides: 0") {
+		t.Fatalf("expected all report metadata, got %q", output)
+	}
+	if output := run("audit", "--event", "traffic_applied"); !strings.Contains(output, "event=traffic_applied") || !strings.Contains(output, "email=scope@example.com") {
+		t.Fatalf("expected traffic audit filter, got %q", output)
+	}
+	if output := run("audit", "--event", "tick"); !strings.Contains(output, "event=traffic_applied") {
+		t.Fatalf("expected tick audit alias, got %q", output)
+	}
+	if output := run("audit", "--limit", "10"); !strings.Contains(output, "limit=10") {
+		t.Fatalf("expected audit limit filter, got %q", output)
+	}
+	if output := run("audit", "--inbound-id", "1"); !strings.Contains(output, "inbound=1") || !strings.Contains(output, "event=traffic_applied") {
+		t.Fatalf("expected inbound audit filter, got %q", output)
+	}
+	if output := run("audit", "--email", "scope@example.com", "--inbound-id", "1"); !strings.Contains(output, "event=traffic_applied") || strings.Contains(output, "free@example.com") {
+		t.Fatalf("expected target audit filter, got %q", output)
+	}
+	if output := run("audit", "--since", "24h"); !strings.Contains(output, "since=24h") {
+		t.Fatalf("expected since audit filter, got %q", output)
+	}
+	if output := run("audit", "--event", "not_real"); !strings.Contains(output, "no events matched") {
+		t.Fatalf("expected clean no-match audit output, got %q", output)
+	}
+}
+
 func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)

@@ -2,6 +2,25 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.3.4-beta - Unreleased
+
+### Added
+
+- `report` command for concise management-level policy, client, metadata, service, and traffic impact summaries.
+- Audit filters for event type, email, inbound, rule id, policy id, limit, and relative time windows.
+- Traffic impact aggregation from `traffic_applied` events that include extra applied bytes.
+- v0.3.4-beta release notes.
+
+### Changed
+
+- Audit output now uses the shared sectioned output style and concise event lines.
+- Tick traffic audit events now include inbound and email metadata for forward-looking report and audit filters.
+
+### Safety
+
+- Report and audit are read-only and do not create audit events.
+- Traffic impact reporting aggregates existing event metadata without rewriting historical events or modifying counters.
+
 ## v0.3.3-beta - Unreleased
 
 ### Added

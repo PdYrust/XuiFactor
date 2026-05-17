@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/PdYrust/XuiFactor/internal/engine"
 	"github.com/PdYrust/XuiFactor/internal/policy"
@@ -125,6 +126,30 @@ func (o output) Match(match policy.Match) {
 	}
 }
 
+func (o output) Event(event store.Event) {
+	ruleID := "-"
+	if event.RuleID != nil {
+		ruleID = strconv.FormatInt(*event.RuleID, 10)
+	}
+	target := eventTarget(event)
+	if target != "" {
+		fmt.Fprintf(o.w, "  %s  event=%s  rule=%s  %s  detail=%s\n",
+			formatEventTime(event.CreatedAt),
+			event.EventType,
+			ruleID,
+			target,
+			event.Message,
+		)
+		return
+	}
+	fmt.Fprintf(o.w, "  %s  event=%s  rule=%s  detail=%s\n",
+		formatEventTime(event.CreatedAt),
+		event.EventType,
+		ruleID,
+		event.Message,
+	)
+}
+
 func scopeLabel(scope *store.Scope) string {
 	if scope == nil {
 		return "-"
@@ -204,4 +229,46 @@ func statusRuleMatchesInbound(rule store.Rule, inboundID *int64) bool {
 		return true
 	}
 	return *rule.Scope.InboundID == *inboundID
+}
+
+func eventTarget(event store.Event) string {
+	parts := make([]string, 0, 2)
+	if event.Email != "" {
+		parts = append(parts, "email="+event.Email)
+	}
+	if event.InboundID != nil {
+		parts = append(parts, "inbound="+strconv.FormatInt(*event.InboundID, 10))
+	}
+	if event.PolicyID != nil {
+		parts = append(parts, "policy="+strconv.FormatInt(*event.PolicyID, 10))
+	}
+	out := ""
+	for _, part := range parts {
+		if out != "" {
+			out += "  "
+		}
+		out += part
+	}
+	return out
+}
+
+func formatEventTime(unix int64) string {
+	return time.Unix(unix, 0).UTC().Format("2006-01-02 15:04:05")
+}
+
+func formatBytes(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB"}
+	value := float64(bytes)
+	unit := 0
+	for value >= 1024 && unit < len(units)-1 {
+		value /= 1024
+		unit++
+	}
+	if unit == 0 {
+		return fmt.Sprintf("%d %s", bytes, units[unit])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unit])
 }

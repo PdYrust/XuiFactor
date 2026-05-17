@@ -51,3 +51,21 @@ func (s *Store) CountActivePersistentScopes(ctx context.Context) (int, error) {
 	`, StateActive).Scan(&count)
 	return count, err
 }
+
+func (s *Store) CountActiveRuleClients(ctx context.Context, inboundID *int64) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM xui_factor_rule_clients rc
+		INNER JOIN xui_factor_rules r ON r.id = rc.rule_id
+		WHERE r.state = ?
+			AND rc.missing_since IS NULL`
+	args := []any{StateActive}
+	if inboundID != nil {
+		query += `
+			AND rc.inbound_id = ?`
+		args = append(args, *inboundID)
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, err
+}

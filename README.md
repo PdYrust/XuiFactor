@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.3.3-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.3-beta_linux_amd64
+tar -xzf xui-factor_v0.3.4-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.4-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -70,6 +70,9 @@ xui-factor remove-override --email User --inbound-id 1
 xui-factor explain --email User --inbound-id 1
 xui-factor status --effective
 xui-factor status --clients --inbound-id 1
+xui-factor report
+xui-factor audit --event override_enabled --limit 20
+xui-factor audit --since 24h
 xui-factor disable --email User --inbound-id 1
 xui-factor disable-all
 xui-factor reconcile --dry-run
@@ -134,6 +137,8 @@ Use `xui-factor exclude --email User --inbound-id 1` to keep one client out of m
 Use `xui-factor override --email User --inbound-id 1 --factor 1.2` to give one exact client a specific future factor while broader scopes remain active. Overrides do not stack with scope factors. `xui-factor remove-override --email User --inbound-id 1` returns the client to matching rules and scopes from the current counters.
 
 Use `xui-factor explain --email User --inbound-id 1` to inspect the final effective decision for one client. Use `xui-factor status --effective` for grouped policy totals and `xui-factor status --clients --inbound-id 1` for client-level effective factors.
+
+Use `xui-factor report` for a concise policy, effective client, service, and traffic impact summary. Use audit filters such as `xui-factor audit --event override_enabled --limit 20` or `xui-factor audit --since 24h` to inspect recent lifecycle events without noisy output.
 
 ## Metadata Cleanup
 

@@ -101,6 +101,8 @@ var migrationStatements = []string{
 		ON xui_factor_overrides(inbound_id, state)`,
 	`CREATE INDEX IF NOT EXISTS idx_xui_factor_events_created
 		ON xui_factor_events(created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_xui_factor_events_type_created
+		ON xui_factor_events(event_type, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_xui_factor_events_rule_created
 		ON xui_factor_events(rule_id, created_at)`,
 }

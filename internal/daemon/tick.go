@@ -406,7 +406,7 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	}); err != nil {
 		return targetResult{}, err
 	}
-	message := fmt.Sprintf("traffic id %d extra_up=%d extra_down=%d extra_all_time=%d", target.Client.TrafficID, extraUp, extraDown, extraAllTime)
+	message := fmt.Sprintf("traffic id %d inbound %d email %s extra_up=%d extra_down=%d extra_all_time=%d", target.Client.TrafficID, target.Client.InboundID, target.Client.Email, extraUp, extraDown, extraAllTime)
 	if err := tx.AddEvent(ctx, &target.Rule.ID, store.EventTrafficApply, message, now); err != nil {
 		return targetResult{}, err
 	}
