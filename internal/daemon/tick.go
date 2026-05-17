@@ -26,6 +26,7 @@ type Runner struct {
 
 type TickResult struct {
 	ActiveClients int
+	Reconciled    int
 	Enrolled      int
 	EnrollSkipped int
 	Applied       int
@@ -59,12 +60,13 @@ func NewWithClock(st *store.Store, cfg config.Config, out, err io.Writer, now fu
 }
 
 func (r TickResult) HasWork() bool {
-	return r.Enrolled > 0 || r.EnrollSkipped > 0 || r.Applied > 0 || r.Baselined > 0 || r.Rebaselined > 0 || r.Missing > 0
+	return r.Reconciled > 0 || r.Enrolled > 0 || r.EnrollSkipped > 0 || r.Applied > 0 || r.Baselined > 0 || r.Rebaselined > 0 || r.Missing > 0
 }
 
 func (r TickResult) Summary() string {
-	return fmt.Sprintf("active=%d enrolled=%d enroll_skipped=%d applied=%d baselined=%d rebaselined=%d missing=%d",
+	return fmt.Sprintf("active=%d reconciled=%d enrolled=%d enroll_skipped=%d applied=%d baselined=%d rebaselined=%d missing=%d",
 		r.ActiveClients,
+		r.Reconciled,
 		r.Enrolled,
 		r.EnrollSkipped,
 		r.Applied,
@@ -79,6 +81,12 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 	var result TickResult
 
 	err := r.store.WithImmediateTx(ctx, func(tx *store.Tx) error {
+		reconciled, err := engine.ReconcileTx(ctx, tx, now, engine.ReconcileRequest{})
+		if err != nil {
+			return err
+		}
+		result.Reconciled = reconciled.Reconciled
+
 		enrolled, skipped, err := r.reconcileScopes(ctx, tx, now)
 		if err != nil {
 			return err

@@ -2,6 +2,25 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.2.2-beta - Unreleased
+
+### Added
+
+- `reconcile` command with dry-run and inbound filtering for legacy active single-user rules.
+- Tick-time reconciliation before scope enrollment and traffic factor application.
+- v0.2.2-beta release notes.
+
+### Fixed
+
+- Active single-user rules with zero clients, missing clients, mismatched identities, or ineligible disabled clients are reconciled out of the active effective set.
+- Normal status now shows only effective active or paused work by default.
+- Compatible legacy single-user rules left beside persistent scopes are adopted or superseded without changing traffic counters.
+
+### Safety
+
+- Reconciliation never modifies 3x-ui counters and marks ineffective metadata inactive before any tick updates can run.
+- Orphaned legacy rules are retained for audit/status history and are pruned by cleanup retention.
+
 ## v0.2.1-beta - Unreleased
 
 ### Fixed

@@ -70,13 +70,13 @@ func (tx *Tx) ListActiveRuleClients(ctx context.Context) ([]ActiveRuleClient, er
 
 func (tx *Tx) ClientTrafficByID(ctx context.Context, trafficID int64) (ClientTraffic, error) {
 	row := tx.QueryRowContext(ctx, `
-		SELECT id, inbound_id, email, up, down, all_time
+		SELECT id, inbound_id, enable, email, up, down, all_time, total
 		FROM client_traffics
 		WHERE id = ?
 		LIMIT 1
 	`, trafficID)
 	var c ClientTraffic
-	if err := row.Scan(&c.ID, &c.InboundID, &c.Email, &c.Up, &c.Down, &c.AllTime); err != nil {
+	if err := row.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.AllTime, &c.Total); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ClientTraffic{}, ErrNotFound
 		}

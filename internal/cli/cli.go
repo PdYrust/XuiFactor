@@ -87,6 +87,8 @@ func (a *App) Run(args []string) int {
 		return a.runBackup(ctx, common, args[1:])
 	case "cleanup":
 		return a.runCleanup(ctx, common, args[1:])
+	case "reconcile":
+		return a.runReconcile(ctx, common, args[1:])
 	case "tick":
 		return a.runTick(ctx, common, args[1:])
 	case "run":
@@ -268,9 +270,9 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		return 0
 	}
 	if includeDisabled {
-		fmt.Fprintln(a.Out, "status: rules including disabled")
+		fmt.Fprintln(a.Out, "status: rules including inactive")
 	} else {
-		fmt.Fprintln(a.Out, "status: active and paused rules")
+		fmt.Fprintln(a.Out, "status: effective active and paused rules")
 	}
 	for _, rule := range rules {
 		printRule(a.Out, rule)
@@ -572,6 +574,31 @@ func (a *App) runCleanup(ctx context.Context, opts commonOptions, args []string)
 	return 0
 }
 
+func (a *App) runReconcile(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseReconcileArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, _, err := a.openService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	result, err := svc.Reconcile(ctx, engine.ReconcileRequest{
+		InboundID: flags.inboundID,
+		DryRun:    flags.dryRun,
+	})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	fmt.Fprintf(a.Out, "reconcile: %s\n", result.Summary())
+	return 0
+}
+
 func (a *App) runTick(ctx context.Context, opts commonOptions, args []string) int {
 	if len(args) != 0 {
 		a.printError(fmt.Errorf("tick: unexpected argument %q", args[0]))
@@ -790,6 +817,11 @@ type cleanupFlags struct {
 	vacuum    bool
 }
 
+type reconcileFlags struct {
+	dryRun    bool
+	inboundID *int64
+}
+
 func parseEnableArgs(args []string) (enableFlags, error) {
 	var flags enableFlags
 	for i := 0; i < len(args); i++ {
@@ -941,6 +973,37 @@ func parseCleanupArgs(args []string) (cleanupFlags, error) {
 	return flags, nil
 }
 
+func parseReconcileArgs(args []string) (reconcileFlags, error) {
+	var flags reconcileFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--dry-run":
+			flags.dryRun = true
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		default:
+			return flags, fmt.Errorf("reconcile: unknown argument %q", arg)
+		}
+	}
+	return flags, nil
+}
+
 func parseSelectorArgs(args []string) (engine.RuleSelector, error) {
 	var selector engine.RuleSelector
 	for i := 0; i < len(args); i++ {
@@ -1084,7 +1147,7 @@ Commands:
   help       Show this help text
   version    Print version metadata
   doctor     Check database schema and metadata
-  status     List active and paused rules
+  status     List effective active and paused rules
   enable     Enable a factor rule
   enable-all Enable factor rules for selected clients
   disable    Disable a rule and keep existing results
@@ -1096,6 +1159,7 @@ Commands:
   audit      Show lifecycle events
   backup     Create a timestamped SQLite backup
   cleanup    Prune stale XuiFactor metadata
+  reconcile  Reconcile ineffective legacy rules
   tick       Apply one factor tick and exit
   run        Start the factor sidecar
 
@@ -1114,10 +1178,11 @@ Examples:
   %s disable-all
   %s backup
   %s cleanup --dry-run
+  %s reconcile --dry-run
   %s doctor
   %s tick
   %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 func (a *App) printVersion(w io.Writer) {

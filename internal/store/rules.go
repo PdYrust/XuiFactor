@@ -160,6 +160,15 @@ func (tx *Tx) SetRuleMerged(ctx context.Context, id, now int64) error {
 	return err
 }
 
+func (tx *Tx) SetRuleOrphaned(ctx context.Context, id, now int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_rules
+		SET state=?, updated_at=?, disabled_at=?
+		WHERE id=?
+	`, StateOrphaned, now, now, id)
+	return err
+}
+
 func (tx *Tx) SetRulePaused(ctx context.Context, id, now int64) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE xui_factor_rules
@@ -201,10 +210,33 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 	query := `
 		SELECT r.id, COALESCE(r.name, ''), COALESCE(r.inbound_id, 0), r.email, r.factor_ppm, r.state,
 			r.created_at, r.updated_at, r.activated_at, r.paused_at, r.disabled_at,
-			COALESCE(SUM(CASE WHEN rc.missing_since IS NULL THEN 1 ELSE 0 END), 0) AS client_count,
+			COALESCE(SUM(CASE
+				WHEN rc.missing_since IS NULL
+					AND ct.id IS NOT NULL
+					AND (
+						(s.rule_id IS NULL AND ct.enable = 1)
+						OR (s.rule_id IS NOT NULL AND (s.include_disabled_clients = 1 OR ct.enable = 1))
+					)
+					AND (
+						s.rule_id IS NOT NULL
+						OR NOT EXISTS (
+							SELECT 1
+							FROM xui_factor_rule_clients scope_rc
+							INNER JOIN xui_factor_rules scope_r ON scope_r.id = scope_rc.rule_id
+							INNER JOIN xui_factor_scopes scope_s ON scope_s.rule_id = scope_r.id
+							WHERE scope_rc.traffic_id = rc.traffic_id
+								AND scope_r.state = ?
+								AND scope_r.id <> r.id
+						)
+					)
+				THEN 1 ELSE 0 END), 0) AS client_count,
 			s.rule_id, s.inbound_id, s.limited_only, s.include_disabled_clients, s.once, s.created_at, s.updated_at
 		FROM xui_factor_rules r
 		LEFT JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
+		LEFT JOIN client_traffics ct
+			ON ct.id = rc.traffic_id
+			AND ct.inbound_id = rc.inbound_id
+			AND ct.email = rc.email
 		LEFT JOIN xui_factor_scopes s ON s.rule_id = r.id`
 	if includeDisabled {
 		query += " GROUP BY r.id ORDER BY r.id"
@@ -215,9 +247,9 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 	var rows *sql.Rows
 	var err error
 	if includeDisabled {
-		rows, err = s.db.QueryContext(ctx, query)
+		rows, err = s.db.QueryContext(ctx, query, StateActive)
 	} else {
-		rows, err = s.db.QueryContext(ctx, query, StateActive, StatePaused)
+		rows, err = s.db.QueryContext(ctx, query, StateActive, StateActive, StatePaused)
 	}
 	if err != nil {
 		return nil, err
@@ -229,6 +261,9 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 		rule, err := scanRuleRowsWithCountAndScope(rows)
 		if err != nil {
 			return nil, err
+		}
+		if !includeDisabled && rule.Scope == nil && rule.ClientCount == 0 {
+			continue
 		}
 		rules = append(rules, rule)
 	}

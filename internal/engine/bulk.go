@@ -80,7 +80,15 @@ func (s *Service) EnableAll(ctx context.Context, req EnableAllRequest) (BulkResu
 		if req.Once {
 			return s.enableAllSnapshot(ctx, tx, req, factorPPM, clients, now, &result)
 		}
-		return s.enableAllPersistent(ctx, tx, req, factorPPM, clients, now, &result)
+		if err := s.enableAllPersistent(ctx, tx, req, factorPPM, clients, now, &result); err != nil {
+			return err
+		}
+		reconciled, err := ReconcileTx(ctx, tx, now, ReconcileRequest{InboundID: req.InboundID})
+		if err != nil {
+			return err
+		}
+		result.Adopted += reconciled.Superseded
+		return nil
 	})
 	return result, err
 }
@@ -260,7 +268,7 @@ func (s *Service) enableAllPersistent(ctx context.Context, tx *store.Tx, req Ena
 			continue
 		}
 
-		adopted, reason, err := s.adoptSingleRuleIntoScope(ctx, tx, scope, rule, client, now)
+		adopted, reason, err := adoptSingleRuleIntoScope(ctx, tx, scope, rule, client, now)
 		if err != nil {
 			return err
 		}
@@ -278,7 +286,7 @@ func (s *Service) enableAllPersistent(ctx context.Context, tx *store.Tx, req Ena
 	return nil
 }
 
-func (s *Service) adoptSingleRuleIntoScope(ctx context.Context, tx *store.Tx, scope store.Scope, rule store.Rule, client store.ClientTraffic, now int64) (bool, string, error) {
+func adoptSingleRuleIntoScope(ctx context.Context, tx *store.Tx, scope store.Scope, rule store.Rule, client store.ClientTraffic, now int64) (bool, string, error) {
 	if rule.FactorPPM != scope.Rule.FactorPPM {
 		return false, "factor does not match scope", nil
 	}
