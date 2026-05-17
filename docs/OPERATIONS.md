@@ -13,12 +13,14 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.2.2-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.2-beta_linux_amd64
+tar -xzf xui-factor_v0.2.3-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.3-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
 Use the `linux_arm64` archive on ARM64 hosts.
+
+On systemd hosts, install enables and starts `xui-factor.service` by default. Use `--no-start` to install files without starting the daemon, and `--no-enable` to avoid enabling service startup.
 
 ## 3. Installation from local checkout
 
@@ -168,10 +170,10 @@ This is useful after enabling a rule, during maintenance checks, or before start
 
 ## 12. Daemon service operation
 
-Enable and start the service:
+Install and update enable and start the service by default on systemd hosts. Check service state:
 
 ```sh
-sudo systemctl enable --now xui-factor.service
+systemctl status xui-factor.service --no-pager
 ```
 
 Restart the service:
@@ -180,10 +182,10 @@ Restart the service:
 sudo systemctl restart xui-factor.service
 ```
 
-Check service state:
+Enable and start the service manually when an opt-out flag was used:
 
 ```sh
-sudo systemctl status xui-factor.service
+sudo systemctl enable --now xui-factor.service
 ```
 
 Follow service logs:
@@ -265,7 +267,7 @@ From a new release package, run:
 sudo ./scripts/update.sh
 ```
 
-The update workflow preserves existing config, refreshes installed package files, and restarts `xui-factor.service` only when it was active before the update.
+The update workflow preserves existing config, refreshes installed package files, enables `xui-factor.service`, and restarts it by default. Use `--no-start` or `--no-restart` to skip restart, and `--no-enable` to avoid enabling service startup.
 
 ## 17. Uninstall workflow
 

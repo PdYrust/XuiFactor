@@ -27,12 +27,14 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.2.2-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.2-beta_linux_amd64
+tar -xzf xui-factor_v0.2.3-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.3-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
 Use the matching `linux_arm64` package on ARM64 hosts.
+
+On systemd hosts, install enables and starts `xui-factor.service` by default. Use `--no-start` or `--no-enable` only when another init workflow will run the daemon.
 
 Install from a local checkout:
 
@@ -67,7 +69,7 @@ xui-factor status
 xui-factor audit --email User --inbound-id 1
 xui-factor tick
 sudo systemctl enable --now xui-factor.service
-sudo systemctl status xui-factor.service
+sudo systemctl status xui-factor.service --no-pager
 ```
 
 ## Operation Examples

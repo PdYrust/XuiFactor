@@ -262,14 +262,20 @@ func TestCLIConfigFlagDoctorAndBackup(t *testing.T) {
 		"OK database read",
 		"OK database write",
 		"OK schema",
-		"OK metadata",
+		"WARN metadata unavailable: metadata tables are missing",
 		"OK backup dir " + backupDir,
-		"OK rules active=0 paused=0 disabled=0",
+		"service installed:",
+		"service enabled:",
+		"service active:",
+		"WARN rules unavailable: metadata tables are missing",
 		"doctor: OK",
 	} {
 		if !strings.Contains(doctorOutput, want) {
 			t.Fatalf("doctor output missing %q: %q", want, doctorOutput)
 		}
+	}
+	if cliMetadataTableExists(t, dbPath, "xui_factor_rules") {
+		t.Fatalf("doctor created metadata tables")
 	}
 
 	out.Reset()
@@ -290,6 +296,86 @@ func TestCLIConfigFlagDoctorAndBackup(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("backup entries = %d, want 1", len(entries))
+	}
+}
+
+func TestCLIDoctorReportsServiceState(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "x-ui.db")
+	configPath := filepath.Join(dir, "config.json")
+	createCLITestSchema(t, dbPath)
+	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
+	withMockDoctorService(t, "enabled", "active", true)
+
+	var out, errOut bytes.Buffer
+	code := New(&out, &errOut).Run([]string{"--config", configPath, "doctor"})
+	if code != 0 {
+		t.Fatalf("doctor exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
+	}
+	output := out.String()
+	for _, want := range []string{
+		"service installed: yes",
+		"service enabled: yes",
+		"service active: yes",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("doctor output missing %q: %q", want, output)
+		}
+	}
+}
+
+func TestCLIDoctorWarnsWhenActiveRulesExistButServiceInactive(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "x-ui.db")
+	configPath := filepath.Join(dir, "config.json")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "warn@example.com", 100, 200, 300)
+	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	if code := app.Run([]string{"--config", configPath, "enable", "--email", "warn@example.com", "--factor", "2"}); code != 0 {
+		t.Fatalf("enable exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
+	}
+	withMockDoctorService(t, "disabled", "inactive", true)
+
+	out.Reset()
+	errOut.Reset()
+	if code := app.Run([]string{"--config", configPath, "doctor"}); code != 0 {
+		t.Fatalf("doctor exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
+	}
+	output := out.String()
+	if !strings.Contains(output, "service enabled: no") || !strings.Contains(output, "service active: no") {
+		t.Fatalf("doctor did not report inactive service: %q", output)
+	}
+	if !strings.Contains(output, "warning: active rules exist but xui-factor.service is not running") {
+		t.Fatalf("doctor missing active rule warning: %q", output)
+	}
+}
+
+func TestCLIDoctorWarnsWhenPersistentScopesNeedService(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "x-ui.db")
+	configPath := filepath.Join(dir, "config.json")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "scope@example.com", 100, 200, 300)
+	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	if code := app.Run([]string{"--config", configPath, "enable-all", "--inbound-id", "1", "--factor", "2"}); code != 0 {
+		t.Fatalf("enable-all exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
+	}
+	withMockDoctorService(t, "enabled", "inactive", true)
+
+	out.Reset()
+	errOut.Reset()
+	if code := app.Run([]string{"--config", configPath, "doctor"}); code != 0 {
+		t.Fatalf("doctor exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
+	}
+	output := out.String()
+	if !strings.Contains(output, "warning: persistent scopes exist but future client auto-enrollment requires xui-factor.service") {
+		t.Fatalf("doctor missing persistent scope warning: %q", output)
 	}
 }
 
@@ -407,7 +493,7 @@ func TestCLIDoctorMissingSchema(t *testing.T) {
 	}
 }
 
-func TestCLIMetadataMigrationFailure(t *testing.T) {
+func TestCLIDoctorPartialMetadataIsReadOnly(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "x-ui.db")
 	configPath := filepath.Join(dir, "config.json")
@@ -419,11 +505,11 @@ func TestCLIMetadataMigrationFailure(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := New(&out, &errOut).Run([]string{"--config", configPath, "doctor"})
-	if code == 0 {
-		t.Fatalf("doctor succeeded with invalid metadata schema, stdout=%q", out.String())
+	if code != 0 {
+		t.Fatalf("doctor exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
 	}
-	if !strings.Contains(errOut.String(), "metadata migration") {
-		t.Fatalf("expected metadata migration error, got %q", errOut.String())
+	if !strings.Contains(out.String(), "WARN metadata unavailable") {
+		t.Fatalf("expected metadata warning, got %q", out.String())
 	}
 }
 
@@ -635,6 +721,57 @@ func setCLITestCounters(t *testing.T, dbPath string, id, up, down, allTime int64
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
 	execCLITestSQL(t, db, `UPDATE client_traffics SET up=?, down=?, all_time=? WHERE id=?`, up, down, allTime, id)
+}
+
+func cliMetadataTableExists(t *testing.T, dbPath, table string) bool {
+	t.Helper()
+	db := openCLITestDB(t, dbPath)
+	defer db.Close()
+	var name string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("check metadata table: %v", err)
+	}
+	return true
+}
+
+func withMockDoctorService(t *testing.T, enabledState, activeState string, installed bool) {
+	t.Helper()
+	oldSystemctl := systemctlCommand
+	oldRuntime := systemdRuntimeDir
+	oldUnit := systemdUnitFile
+	dir := t.TempDir()
+	runtimeDir := filepath.Join(dir, "run-systemd")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatalf("create runtime dir: %v", err)
+	}
+	unitFile := filepath.Join(dir, "xui-factor.service")
+	if installed {
+		if err := os.WriteFile(unitFile, []byte("[Service]\n"), 0o644); err != nil {
+			t.Fatalf("write unit file: %v", err)
+		}
+	}
+	mock := filepath.Join(dir, "systemctl")
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"  is-enabled) printf '%s\\n' \"" + enabledState + "\"; [ \"" + enabledState + "\" = enabled ]; exit $? ;;\n" +
+		"  is-active) printf '%s\\n' \"" + activeState + "\"; [ \"" + activeState + "\" = active ]; exit $? ;;\n" +
+		"  *) exit 0 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(mock, []byte(script), 0o755); err != nil {
+		t.Fatalf("write mock systemctl: %v", err)
+	}
+	systemctlCommand = mock
+	systemdRuntimeDir = runtimeDir
+	systemdUnitFile = unitFile
+	t.Cleanup(func() {
+		systemctlCommand = oldSystemctl
+		systemdRuntimeDir = oldRuntime
+		systemdUnitFile = oldUnit
+	})
 }
 
 func openCLITestDB(t *testing.T, dbPath string) *sql.DB {

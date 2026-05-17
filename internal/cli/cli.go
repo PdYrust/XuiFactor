@@ -25,6 +25,12 @@ const (
 	displayName = "XuiFactor"
 )
 
+var (
+	systemctlCommand  = "systemctl"
+	systemdRuntimeDir = "/run/systemd/system"
+	systemdUnitFile   = "/etc/systemd/system/xui-factor.service"
+)
+
 type App struct {
 	Out  io.Writer
 	Err  io.Writer
@@ -185,25 +191,16 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 	}
 	fmt.Fprintln(a.Out, "OK schema")
 	metadataReady := false
-	if dbAccess.Writable {
-		if err := st.Migrate(ctx); err != nil {
-			a.printError(err)
-			return 1
-		}
-		metadataReady = true
+	ready, err := st.MetadataReady(ctx)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	metadataReady = ready
+	if ready {
 		fmt.Fprintln(a.Out, "OK metadata")
 	} else {
-		ready, err := st.MetadataReady(ctx)
-		if err != nil {
-			a.printError(err)
-			return 1
-		}
-		metadataReady = ready
-		if ready {
-			fmt.Fprintln(a.Out, "OK metadata read-only")
-		} else {
-			fmt.Fprintln(a.Out, "WARN metadata unavailable: database is not writable")
-		}
+		fmt.Fprintln(a.Out, "WARN metadata unavailable: metadata tables are missing")
 	}
 
 	if err := validateBackupDir(cfg.BackupDir); err != nil {
@@ -212,6 +209,11 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 	}
 	fmt.Fprintf(a.Out, "OK backup dir %s\n", cfg.BackupDir)
 
+	service := systemdServiceState()
+	fmt.Fprintf(a.Out, "service installed: %s\n", service.Installed)
+	fmt.Fprintf(a.Out, "service enabled: %s\n", service.Enabled)
+	fmt.Fprintf(a.Out, "service active: %s\n", service.Active)
+
 	if metadataReady {
 		counts, err := st.CountRules(ctx)
 		if err != nil {
@@ -219,10 +221,20 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 			return 1
 		}
 		fmt.Fprintf(a.Out, "OK rules active=%d paused=%d disabled=%d\n", counts.Active, counts.Paused, counts.Disabled)
+		if (counts.Active > 0 || counts.Paused > 0) && (service.Active != "yes" || service.Enabled == "no") {
+			fmt.Fprintln(a.Out, "warning: active rules exist but xui-factor.service is not running")
+		}
+		persistentScopes, err := st.CountActivePersistentScopes(ctx)
+		if err != nil {
+			a.printError(err)
+			return 1
+		}
+		if persistentScopes > 0 && service.Active != "yes" {
+			fmt.Fprintln(a.Out, "warning: persistent scopes exist but future client auto-enrollment requires xui-factor.service")
+		}
 	} else {
 		fmt.Fprintln(a.Out, "WARN rules unavailable: metadata tables are missing")
 	}
-	fmt.Fprintf(a.Out, "service: %s\n", systemdServiceState())
 	fmt.Fprintln(a.Out, "doctor: OK")
 	return 0
 }
@@ -739,25 +751,78 @@ func validateBackupDir(path string) error {
 	return nil
 }
 
-func systemdServiceState() string {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return "unavailable"
+type serviceState struct {
+	Installed string
+	Enabled   string
+	Active    string
+}
+
+func systemdServiceState() serviceState {
+	state := serviceState{
+		Installed: serviceInstalledFromUnitFile(),
+		Enabled:   "unknown",
+		Active:    "unknown",
 	}
-	if _, err := os.Stat("/run/systemd/system"); err != nil {
-		return "unavailable"
-	}
-	output, err := exec.Command("systemctl", "is-active", "xui-factor.service").CombinedOutput()
-	state := strings.TrimSpace(string(output))
-	if err != nil {
-		if state == "" {
-			return "inactive"
-		}
+	if _, err := exec.LookPath(systemctlCommand); err != nil {
 		return state
 	}
-	if state == "" {
-		return "active"
+	if _, err := os.Stat(systemdRuntimeDir); err != nil {
+		return state
+	}
+
+	state.Enabled = serviceEnabledState()
+	state.Active = serviceActiveState()
+	if state.Installed != "yes" && (state.Enabled == "yes" || state.Active == "yes") {
+		state.Installed = "yes"
 	}
 	return state
+}
+
+func serviceInstalledFromUnitFile() string {
+	if _, err := os.Stat(systemdUnitFile); err == nil {
+		return "yes"
+	} else if errors.Is(err, os.ErrNotExist) {
+		return "no"
+	}
+	return "unknown"
+}
+
+func serviceEnabledState() string {
+	output, err := exec.Command(systemctlCommand, "is-enabled", "xui-factor.service").CombinedOutput()
+	text := strings.TrimSpace(string(output))
+	if err == nil {
+		return "yes"
+	}
+	switch text {
+	case "disabled", "indirect", "static", "masked":
+		return "no"
+	case "":
+		return "unknown"
+	default:
+		if strings.Contains(text, "not-found") || strings.Contains(text, "not found") {
+			return "no"
+		}
+		return "unknown"
+	}
+}
+
+func serviceActiveState() string {
+	output, err := exec.Command(systemctlCommand, "is-active", "xui-factor.service").CombinedOutput()
+	text := strings.TrimSpace(string(output))
+	if err == nil {
+		return "yes"
+	}
+	switch text {
+	case "inactive", "failed", "deactivating", "activating", "reloading":
+		return "no"
+	case "":
+		return "unknown"
+	default:
+		if strings.Contains(text, "not-found") || strings.Contains(text, "not found") {
+			return "no"
+		}
+		return "unknown"
+	}
 }
 
 func (a *App) openService(ctx context.Context, opts commonOptions) (*engine.Service, *store.Store, config.Config, error) {
