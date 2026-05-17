@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/PdYrust/XuiFactor/blob/main/docs/OPERATIONS.md
+    about: Installation, operations, policy behavior, and troubleshooting guidance.
+  - name: Security reporting
+    url: https://github.com/PdYrust/XuiFactor/security
+    about: Do not report vulnerabilities in public issues. Use private security reporting when available.
+  - name: Project channel
+    url: https://t.me/PdYrust
+    about: Project updates and lightweight community help.

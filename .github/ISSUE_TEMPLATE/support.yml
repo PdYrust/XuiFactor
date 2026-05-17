@@ -1,0 +1,61 @@
+name: General support or help request
+description: Ask for help with a narrow XuiFactor workflow after checking the docs.
+title: "[Help]: "
+labels:
+  - support
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste sensitive data such as UUIDs, tokens, private keys, domain secrets, or full database files.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: State what you are trying to do and where you are blocked.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: XuiFactor version
+      placeholder: xui-factor version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, architecture, install/update method, package architecture, and 3x-ui version if available.
+      placeholder: |
+        OS: Debian 12
+        architecture: linux_amd64
+        install method: release package
+        package architecture: linux_amd64
+        3x-ui version: unknown
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands tried
+      render: bash
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Include sanitized `xui-factor doctor`, `xui-factor status`, or service state output if useful.
+      placeholder: |
+        xui-factor doctor
+        xui-factor status
+        systemctl status xui-factor.service --no-pager
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked README.md and docs/OPERATIONS.md first.
+          required: true
+        - label: I redacted sensitive data and private identifiers.
+          required: true

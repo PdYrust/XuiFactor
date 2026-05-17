@@ -1,0 +1,70 @@
+name: Configuration or server environment issue
+description: Report a config, database path, permissions, service, or 3x-ui environment problem.
+title: "[Config]: "
+labels:
+  - configuration
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share sanitized details only. Do not paste UUIDs, tokens, private keys, domain secrets, or full database files.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the configuration or server environment issue.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: XuiFactor version
+      placeholder: xui-factor version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Server environment
+      description: Include OS, architecture, 3x-ui version if available, install method, and service state.
+      placeholder: |
+        OS: Debian 12
+        architecture: linux_arm64
+        3x-ui version: unknown
+        service: active
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Sanitized config details
+      description: Include paths and relevant settings only. Redact sensitive values.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Include sanitized doctor, status, and service output.
+      placeholder: |
+        xui-factor doctor
+        xui-factor status
+        systemctl status xui-factor.service --no-pager
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Explain which commands or policies are affected.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I provided sanitized config details only.
+          required: true
+        - label: I did not attach or paste full database files.
+          required: true

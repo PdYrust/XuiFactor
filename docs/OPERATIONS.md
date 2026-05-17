@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.3.5-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.5-beta_linux_amd64
+tar -xzf xui-factor_v0.4.0_linux_amd64.tar.gz
+cd xui-factor_v0.4.0_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -283,7 +283,7 @@ xui-factor report
 xui-factor report --inbound-id 1
 ```
 
-Report summarizes active scopes, single-user rules, excludes, overrides, effective clients, service state, metadata state, and traffic impact. Traffic impact is aggregated from `traffic_applied` audit events. v0.3.4-beta adds inbound and email metadata to new traffic audit events so filtered impact reports improve from this release forward; older events are not rewritten.
+Report summarizes active scopes, single-user rules, excludes, overrides, effective clients, service state, metadata state, and traffic impact. Traffic impact is aggregated from `traffic_applied` audit events. Traffic audit events added before v0.3.4-beta may not include all filter metadata; older events are not rewritten.
 
 List effective active and paused rules:
 

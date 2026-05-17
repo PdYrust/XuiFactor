@@ -1,0 +1,91 @@
+name: Installation or update problem
+description: Report a problem with install, update, uninstall, packages, or service lifecycle.
+title: "[Install]: "
+labels:
+  - install
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste sensitive data such as UUIDs, tokens, private keys, domain secrets, or full database files.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe where the install or update failed.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: XuiFactor version
+      placeholder: 0.4.0
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: Method
+      options:
+        - scripts/install.sh
+        - scripts/update.sh
+        - scripts/uninstall.sh
+        - manual package extraction
+        - local checkout
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: package_arch
+    attributes:
+      label: Package architecture
+      options:
+        - linux_amd64
+        - linux_arm64
+        - not sure
+        - not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, architecture, shell, and whether systemd is available.
+      placeholder: |
+        OS: Ubuntu 24.04
+        architecture: linux_amd64
+        systemd: yes
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands executed
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or logs
+      description: Include installer output and service diagnostics if relevant.
+      placeholder: |
+        systemctl status xui-factor.service --no-pager
+        journalctl -u xui-factor.service -n 80 --no-pager
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config notes
+      description: Provide sanitized config details only. Do not attach full database files.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I confirmed `/etc/x-ui/x-ui.db` was not attached or pasted.
+          required: true
+        - label: I redacted secrets and private identifiers.
+          required: true

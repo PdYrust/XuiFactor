@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -109,4 +112,137 @@ func TestUnknownCommand(t *testing.T) {
 	if !strings.Contains(err.String(), "unknown command") {
 		t.Fatalf("expected unknown command error, got %q", err.String())
 	}
+}
+
+func TestStableReleaseMetadata(t *testing.T) {
+	version := strings.TrimSpace(readRepoFile(t, "VERSION"))
+	if version != "0.4.0" {
+		t.Fatalf("expected VERSION to be 0.4.0, got %q", version)
+	}
+
+	readme := readRepoFile(t, "README.md")
+	for _, want := range []string{
+		"xui-factor_v0.4.0_linux_amd64.tar.gz",
+		"license-AGPL--3.0-111111",
+		"status-stable-111111",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Fatalf("expected README to contain %q", want)
+		}
+	}
+	if strings.Contains(readme, "xui-factor_v0.3.5-beta") {
+		t.Fatalf("README still contains stale v0.3.5-beta package examples")
+	}
+
+	operations := readRepoFile(t, "docs/OPERATIONS.md")
+	if !strings.Contains(operations, "xui-factor_v0.4.0_linux_amd64.tar.gz") {
+		t.Fatalf("operations guide does not contain v0.4.0 package example")
+	}
+	if strings.Contains(operations, "xui-factor_v0.3.5-beta") {
+		t.Fatalf("operations guide still contains stale v0.3.5-beta package examples")
+	}
+
+	releaseWorkflow := readRepoFile(t, ".github/workflows/release.yml")
+	for _, want := range []string{"v0.4.0", "docs/releases/v0.4.0.md", "default: false"} {
+		if !strings.Contains(releaseWorkflow, want) {
+			t.Fatalf("expected release workflow to contain %q", want)
+		}
+	}
+	if strings.Contains(releaseWorkflow, "v0.3.5-beta") {
+		t.Fatalf("release workflow still contains stale v0.3.5-beta examples")
+	}
+
+	releaseNotes := readRepoFile(t, "docs/releases/v0.4.0.md")
+	for _, want := range []string{
+		"# XuiFactor v0.4.0",
+		"xui-factor_v0.4.0_linux_amd64.tar.gz",
+		"xui-factor_v0.4.0_linux_arm64.tar.gz",
+	} {
+		if !strings.Contains(releaseNotes, want) {
+			t.Fatalf("expected v0.4.0 release notes to contain %q", want)
+		}
+	}
+	for _, stale := range []string{"v0.4.0-beta", "xui-factor_v0.4.0-beta"} {
+		if strings.Contains(releaseNotes, stale) {
+			t.Fatalf("v0.4.0 release notes contain stale beta marker %q", stale)
+		}
+	}
+
+	changelog := readRepoFile(t, "CHANGELOG.md")
+	if !strings.Contains(changelog, "## v0.4.0 - Stable") {
+		t.Fatalf("changelog is missing v0.4.0 stable entry")
+	}
+}
+
+func TestIssueTemplates(t *testing.T) {
+	expected := []string{
+		".github/ISSUE_TEMPLATE/config.yml",
+		".github/ISSUE_TEMPLATE/bug-report.yml",
+		".github/ISSUE_TEMPLATE/feature-request.yml",
+		".github/ISSUE_TEMPLATE/installation-update.yml",
+		".github/ISSUE_TEMPLATE/configuration-server.yml",
+		".github/ISSUE_TEMPLATE/documentation.yml",
+		".github/ISSUE_TEMPLATE/support.yml",
+	}
+	for _, path := range expected {
+		if strings.TrimSpace(readRepoFile(t, path)) == "" {
+			t.Fatalf("issue template %s is empty", path)
+		}
+	}
+
+	config := readRepoFile(t, ".github/ISSUE_TEMPLATE/config.yml")
+	for _, want := range []string{"blank_issues_enabled: false", "https://t.me/PdYrust"} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("expected issue template config to contain %q", want)
+		}
+	}
+
+	bug := readRepoFile(t, ".github/ISSUE_TEMPLATE/bug-report.yml")
+	for _, want := range []string{
+		"XuiFactor version",
+		"3x-ui version",
+		"xui-factor doctor",
+		"xui-factor status",
+		"systemctl status xui-factor.service --no-pager",
+		"full database files",
+	} {
+		if !strings.Contains(bug, want) {
+			t.Fatalf("expected bug template to contain %q", want)
+		}
+	}
+
+	install := readRepoFile(t, ".github/ISSUE_TEMPLATE/installation-update.yml")
+	for _, want := range []string{
+		"scripts/install.sh",
+		"scripts/update.sh",
+		"linux_amd64",
+		"linux_arm64",
+		"journalctl -u xui-factor.service -n 80 --no-pager",
+	} {
+		if !strings.Contains(install, want) {
+			t.Fatalf("expected install template to contain %q", want)
+		}
+	}
+
+	configIssue := readRepoFile(t, ".github/ISSUE_TEMPLATE/configuration-server.yml")
+	for _, want := range []string{"Sanitized config details", "3x-ui version", "full database files"} {
+		if !strings.Contains(configIssue, want) {
+			t.Fatalf("expected config template to contain %q", want)
+		}
+	}
+}
+
+func readRepoFile(t *testing.T, path string) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to locate test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }

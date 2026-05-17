@@ -2,6 +2,24 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.4.0 - Stable
+
+### Added
+
+- First stable release notes.
+- GitHub issue templates for bug reports, feature requests, installation/update problems, configuration/server environment issues, documentation issues, and support requests.
+
+### Changed
+
+- Release metadata, package examples, and release workflow defaults now point to v0.4.0 stable package names.
+- Documentation was polished for the stable operator workflow across install, update, service lifecycle, policies, explain/status/report/audit, cleanup, and reconcile.
+- README status badge now reflects the stable release line.
+
+### Safety
+
+- No runtime factor behavior changes were added in this stable pass.
+- Existing migration, policy precedence, package, installer, and read-only command safety tests remain part of the release validation.
+
 ## v0.3.5-beta - Unreleased
 
 ### Added
