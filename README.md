@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.3.4-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.4-beta_linux_amd64
+tar -xzf xui-factor_v0.3.5-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.5-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
