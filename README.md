@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.3.1-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.1-beta_linux_amd64
+tar -xzf xui-factor_v0.3.2-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.2-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -64,6 +64,9 @@ xui-factor enable-all --factor 1.2 --once
 xui-factor exclude --email User --inbound-id 1
 xui-factor excludes
 xui-factor unexclude --email User --inbound-id 1
+xui-factor override --email User --inbound-id 1 --factor 1.2
+xui-factor overrides
+xui-factor remove-override --email User --inbound-id 1
 xui-factor disable --email User --inbound-id 1
 xui-factor disable-all
 xui-factor reconcile --dry-run
@@ -121,9 +124,11 @@ Disabling a rule does not revert previously factored traffic. Traffic recorded a
 
 ## Policy Behavior
 
-XuiFactor evaluates one effective decision per client before applying traffic deltas. More specific policy sources take precedence over broader scopes, so overlapping metadata does not double-apply factors. The v0.3 foundation uses this model internally for current single-user rules and persistent scopes, with room for future exclude and override policies.
+XuiFactor evaluates one effective decision per client before applying traffic deltas. Excludes win first, then user overrides, then single-user rules, inbound scopes, and global scopes. Overlapping metadata does not double-apply factors.
 
 Use `xui-factor exclude --email User --inbound-id 1` to keep one client out of matching rules and scopes. Previously factored traffic remains unchanged. `xui-factor unexclude --email User --inbound-id 1` resumes normal policy matching from the current counters, without retroactively factoring traffic from the excluded period.
+
+Use `xui-factor override --email User --inbound-id 1 --factor 1.2` to give one exact client a specific future factor while broader scopes remain active. Overrides do not stack with scope factors. `xui-factor remove-override --email User --inbound-id 1` returns the client to matching rules and scopes from the current counters.
 
 ## Metadata Cleanup
 

@@ -103,7 +103,12 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 		if err != nil {
 			return err
 		}
+		overrides, err := tx.ListActiveOverrides(ctx)
+		if err != nil {
+			return err
+		}
 		candidates := policy.ActiveRuleCandidates(targets)
+		candidates = append(candidates, policy.OverrideCandidatesForActiveTargets(overrides, targets)...)
 		candidates = append(candidates, policy.ExcludeCandidatesForActiveTargets(excludes, targets)...)
 		decisions, err := policy.Decide(candidates)
 		if err != nil {
@@ -176,12 +181,13 @@ func (r *Runner) runAutoCleanup(ctx context.Context, now int64) {
 		fmt.Fprintf(r.err, "cleanup: error: %v\n", err)
 		return
 	}
-	if ran && (result.MissingClientsPruned > 0 || result.DisabledRulesPruned > 0 || result.DisabledScopesPruned > 0 || result.InactiveExcludesPruned > 0 || result.AuditEventsPruned > 0) {
-		fmt.Fprintf(r.out, "cleanup: missing_clients_pruned=%d disabled_rules_pruned=%d disabled_scopes_pruned=%d inactive_excludes_pruned=%d audit_events_pruned=%d vacuum_run=false\n",
+	if ran && (result.MissingClientsPruned > 0 || result.DisabledRulesPruned > 0 || result.DisabledScopesPruned > 0 || result.InactiveExcludesPruned > 0 || result.InactiveOverridesPruned > 0 || result.AuditEventsPruned > 0) {
+		fmt.Fprintf(r.out, "cleanup: missing_clients_pruned=%d disabled_rules_pruned=%d disabled_scopes_pruned=%d inactive_excludes_pruned=%d inactive_overrides_pruned=%d audit_events_pruned=%d vacuum_run=false\n",
 			result.MissingClientsPruned,
 			result.DisabledRulesPruned,
 			result.DisabledScopesPruned,
 			result.InactiveExcludesPruned,
+			result.InactiveOverridesPruned,
 			result.AuditEventsPruned,
 		)
 	}

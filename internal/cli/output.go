@@ -79,6 +79,21 @@ func (o output) Exclude(policy store.ExcludePolicy) {
 	)
 }
 
+func (o output) Override(policy store.OverridePolicy) {
+	note := ""
+	if policy.Note != "" {
+		note = "  note=" + policy.Note
+	}
+	fmt.Fprintf(o.w, "  override  email=%s  inbound=%d  traffic=%d  factor=%s  state=%s%s\n",
+		policy.Email,
+		policy.InboundID,
+		policy.TrafficID,
+		engine.FormatFactor(policy.FactorPPM),
+		policy.State,
+		note,
+	)
+}
+
 func scopeLabel(scope *store.Scope) string {
 	if scope == nil {
 		return "-"

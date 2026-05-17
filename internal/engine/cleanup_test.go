@@ -296,6 +296,66 @@ func TestCleanupPrunesInactiveExcludesAfterRetention(t *testing.T) {
 	}
 }
 
+func TestCleanupDoesNotPruneActiveOverrides(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
+	defer st.Close()
+
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "a@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	setCleanupOverrideUpdatedAt(t, dbPath, 1_699_000_000)
+
+	result, err := svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig()})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.InactiveOverridesPruned != 0 {
+		t.Fatalf("inactive overrides pruned = %d, want 0", result.InactiveOverridesPruned)
+	}
+	if got := countCleanupOverrides(t, dbPath); got != 1 {
+		t.Fatalf("overrides = %d, want 1", got)
+	}
+}
+
+func TestCleanupPrunesInactiveOverridesAfterRetention(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
+	defer st.Close()
+
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "a@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if _, err := svc.RemoveOverride(ctx, OverrideSelector{Email: "a@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("remove override: %v", err)
+	}
+	setCleanupOverrideDisabledAt(t, dbPath, 1_699_000_000)
+
+	result, err := svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig(), DryRun: true})
+	if err != nil {
+		t.Fatalf("cleanup dry-run: %v", err)
+	}
+	if result.InactiveOverridesPruned != 1 {
+		t.Fatalf("dry-run inactive overrides pruned = %d, want 1", result.InactiveOverridesPruned)
+	}
+	if got := countCleanupOverrides(t, dbPath); got != 1 {
+		t.Fatalf("dry-run overrides = %d, want 1", got)
+	}
+
+	result, err = svc.Cleanup(ctx, CleanupRequest{Config: cleanupTestConfig()})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if result.InactiveOverridesPruned != 1 {
+		t.Fatalf("inactive overrides pruned = %d, want 1", result.InactiveOverridesPruned)
+	}
+	if got := countCleanupOverrides(t, dbPath); got != 0 {
+		t.Fatalf("overrides = %d, want 0", got)
+	}
+}
+
 func TestCleanupPrunesOldAuditEventsAfterRetention(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com"}})
@@ -435,6 +495,20 @@ func setCleanupExcludeDisabledAt(t *testing.T, dbPath string, disabledAt int64) 
 	execBulkSQL(t, db, `UPDATE xui_factor_excludes SET disabled_at=?, updated_at=?`, disabledAt, disabledAt)
 }
 
+func setCleanupOverrideUpdatedAt(t *testing.T, dbPath string, updatedAt int64) {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	execBulkSQL(t, db, `UPDATE xui_factor_overrides SET updated_at=?`, updatedAt)
+}
+
+func setCleanupOverrideDisabledAt(t *testing.T, dbPath string, disabledAt int64) {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	execBulkSQL(t, db, `UPDATE xui_factor_overrides SET disabled_at=?, updated_at=?`, disabledAt, disabledAt)
+}
+
 func insertCleanupEvent(t *testing.T, dbPath string, ruleID *int64, eventType, message string, createdAt int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
@@ -486,6 +560,13 @@ func countCleanupExcludes(t *testing.T, dbPath string) int {
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	return countCleanupRows(t, db, `SELECT COUNT(*) FROM xui_factor_excludes`)
+}
+
+func countCleanupOverrides(t *testing.T, dbPath string) int {
+	t.Helper()
+	db := openBulkDB(t, dbPath)
+	defer db.Close()
+	return countCleanupRows(t, db, `SELECT COUNT(*) FROM xui_factor_overrides`)
 }
 
 func countCleanupEvents(t *testing.T, dbPath, eventType string) int {

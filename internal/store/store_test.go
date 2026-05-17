@@ -29,7 +29,7 @@ func TestValidateSchemaAndMigrate(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	for _, table := range []string{"xui_factor_rules", "xui_factor_scopes", "xui_factor_excludes"} {
+	for _, table := range []string{"xui_factor_rules", "xui_factor_scopes", "xui_factor_excludes", "xui_factor_overrides"} {
 		var name string
 		if err := st.db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name); err != nil {
 			t.Fatalf("metadata table %s missing: %v", table, err)

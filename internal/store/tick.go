@@ -141,6 +141,43 @@ func (tx *Tx) UpdateRuleClientBaseline(ctx context.Context, rc RuleClient) error
 	return err
 }
 
+func (tx *Tx) RefreshActiveRuleClientBaselinesForTraffic(ctx context.Context, trafficID, inboundID int64, email string, now int64) (int, error) {
+	current, err := tx.ClientTrafficByID(ctx, trafficID)
+	if err != nil {
+		return 0, err
+	}
+	if current.InboundID != inboundID || current.Email != email {
+		return 0, ErrNotFound
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_rule_clients
+		SET last_up = ?,
+			last_down = ?,
+			last_all_time = ?,
+			rem_up = 0,
+			rem_down = 0,
+			rem_all_time = 0,
+			missing_since = NULL,
+			updated_at = ?
+		WHERE traffic_id = ?
+			AND inbound_id = ?
+			AND email = ?
+			AND rule_id IN (
+				SELECT id
+				FROM xui_factor_rules
+				WHERE state = ?
+			)
+	`, current.Up, current.Down, current.AllTime, now, trafficID, inboundID, email, StateActive)
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 func (tx *Tx) MarkRuleClientMissing(ctx context.Context, ruleID, trafficID, now int64) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE xui_factor_rule_clients
