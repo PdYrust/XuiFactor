@@ -204,8 +204,8 @@ func TestMissingClientRowIsMarkedAndSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if result.Missing != 1 {
-		t.Fatalf("missing = %d, want 1", result.Missing)
+	if result.Reconciled != 1 || result.Missing != 0 {
+		t.Fatalf("result = %#v, want one reconciliation and no target-loop missing", result)
 	}
 	if !ruleClientMissing(t, h.dbPath, 1) {
 		t.Fatalf("expected missing_since to be set")
@@ -580,8 +580,8 @@ func TestAutoCleanupRunsDuringTickWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if result.Missing != 1 {
-		t.Fatalf("missing = %d, want 1", result.Missing)
+	if result.Reconciled != 1 || result.Missing != 0 {
+		t.Fatalf("result = %#v, want one reconciliation and no target-loop missing", result)
 	}
 	if got := countRuleClients(t, h.dbPath); got != 0 {
 		t.Fatalf("rule clients = %d, want 0", got)
@@ -625,8 +625,8 @@ func TestMismatchedClientIdentityMarksMissingAndDoesNotUpdateCounters(t *testing
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if result.Missing != 1 || result.Applied != 0 {
-		t.Fatalf("result = %#v, want missing 1 applied 0", result)
+	if result.Reconciled != 1 || result.Missing != 0 || result.Applied != 0 {
+		t.Fatalf("result = %#v, want reconciled 1 missing 0 applied 0", result)
 	}
 	assertCounters(t, h.dbPath, 1, 110, 220, 330)
 	if !ruleClientMissing(t, h.dbPath, 1) {
@@ -634,6 +634,30 @@ func TestMismatchedClientIdentityMarksMissingAndDoesNotUpdateCounters(t *testing
 	}
 	if got := countEvents(t, h.dbPath, store.EventClientMissing); got != 1 {
 		t.Fatalf("missing events = %d, want 1", got)
+	}
+}
+
+func TestTickDoesNotApplyRuleReconciledDuringTick(t *testing.T) {
+	ctx := context.Background()
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "disabled@example.com", up: 100, down: 200, allTime: 300}})
+	defer h.store.Close()
+
+	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "disabled@example.com", Factor: "5"}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	setTickEnable(t, h.dbPath, 1, 0)
+	setCounters(t, h.dbPath, 1, 110, 220, 330)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.Reconciled != 1 || result.ActiveClients != 0 || result.Applied != 0 {
+		t.Fatalf("result = %#v, want reconciled rule skipped before counter updates", result)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	if got := countTickRulesInState(t, h.dbPath, store.StateOrphaned); got != 1 {
+		t.Fatalf("orphaned rules = %d, want 1", got)
 	}
 }
 
@@ -947,6 +971,13 @@ func setTickTotal(t *testing.T, dbPath string, trafficID, total int64) {
 	execTickSQL(t, db, `UPDATE client_traffics SET total=? WHERE id=?`, total, trafficID)
 }
 
+func setTickEnable(t *testing.T, dbPath string, trafficID, enable int64) {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	execTickSQL(t, db, `UPDATE client_traffics SET enable=? WHERE id=?`, enable, trafficID)
+}
+
 func scopeRuleID(t *testing.T, dbPath string) int64 {
 	t.Helper()
 	db := openTickDB(t, dbPath)
@@ -1023,6 +1054,17 @@ func countActiveTargetsForTraffic(t *testing.T, dbPath string, trafficID int64) 
 		WHERE rc.traffic_id=? AND r.state=?
 	`, trafficID, store.StateActive).Scan(&count); err != nil {
 		t.Fatalf("count active targets: %v", err)
+	}
+	return count
+}
+
+func countTickRulesInState(t *testing.T, dbPath, state string) int {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_rules WHERE state=?`, state).Scan(&count); err != nil {
+		t.Fatalf("count rules in state: %v", err)
 	}
 	return count
 }

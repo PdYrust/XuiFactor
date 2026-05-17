@@ -233,10 +233,10 @@ func (tx *Tx) pruneDisabledRules(ctx context.Context, cutoff, now int64, dryRun 
 		SELECT r.id, CASE WHEN s.rule_id IS NULL THEN 0 ELSE 1 END AS is_scope
 		FROM xui_factor_rules r
 		LEFT JOIN xui_factor_scopes s ON s.rule_id = r.id
-		WHERE r.state IN (?, ?)
+		WHERE r.state IN (?, ?, ?)
 			AND COALESCE(r.disabled_at, r.updated_at) <= ?
 		ORDER BY r.id
-	`, StateDisabled, StateMerged, cutoff)
+	`, StateDisabled, StateMerged, StateOrphaned, cutoff)
 	if err != nil {
 		return 0, 0, err
 	}

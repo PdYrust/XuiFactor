@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.2.1-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.1-beta_linux_amd64
+tar -xzf xui-factor_v0.2.2-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.2-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -196,13 +196,15 @@ The service runs `xui-factor` in daemon mode and polls at the interval configure
 
 ## 13. Status and audit
 
-List active and paused rules:
+List effective active and paused rules:
 
 ```sh
 xui-factor status
 ```
 
-List all rules, including disabled rules:
+Normal status hides orphaned, merged, and ineffective legacy rules. Persistent scopes remain visible with their current materialized client count.
+
+List all rules, including inactive metadata:
 
 ```sh
 xui-factor status --all
@@ -216,7 +218,18 @@ xui-factor audit --email User --inbound-id 1
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
 
-## 14. Metadata cleanup
+## 14. Reconcile legacy metadata
+
+Reconcile older active single-user rules after upgrading or after manual database repair:
+
+```sh
+xui-factor reconcile --dry-run
+xui-factor reconcile
+```
+
+Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible legacy rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned legacy rules are inactive and are pruned later by cleanup retention.
+
+## 15. Metadata cleanup
 
 The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id, inbound id, and email. Missing client tracking is pruned after the grace period.
 
@@ -244,7 +257,7 @@ Cleanup prunes only XuiFactor metadata. It never modifies 3x-ui counters and doe
 xui-factor cleanup --vacuum
 ```
 
-## 15. Update workflow
+## 16. Update workflow
 
 From a new release package, run:
 
@@ -254,7 +267,7 @@ sudo ./scripts/update.sh
 
 The update workflow preserves existing config, refreshes installed package files, and restarts `xui-factor.service` only when it was active before the update.
 
-## 16. Uninstall workflow
+## 17. Uninstall workflow
 
 Remove the installed binary, service, and shared package files while preserving config and backups:
 
@@ -270,7 +283,7 @@ sudo ./scripts/uninstall.sh --purge
 
 Uninstall and purge must not remove `/etc/x-ui/x-ui.db`.
 
-## 17. Recovery expectations
+## 18. Recovery expectations
 
 XuiFactor does not automatically restore backups. To recover from a selected backup:
 
@@ -284,12 +297,13 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 
 Keep backup files until the recovered server has been verified.
 
-## 18. Safety checklist
+## 19. Safety checklist
 
 - Run `xui-factor doctor` first.
 - Run `xui-factor backup` before broad changes.
 - Test a single user before `enable-all`.
 - Use `--limited-only` if unlimited clients should be skipped.
+- Run `xui-factor reconcile --dry-run` after upgrades with legacy active rules.
 - Run `xui-factor cleanup --dry-run` before manual metadata cleanup.
 - Verify `xui-factor status` and `xui-factor audit` after changes.
 - Keep backup files before uninstall or purge.

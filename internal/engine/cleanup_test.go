@@ -98,8 +98,8 @@ func TestStatusDoesNotCountMissingMaterializedClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if len(rules) != 1 || rules[0].ClientCount != 0 {
-		t.Fatalf("rules = %#v, want one rule with zero counted clients", rules)
+	if len(rules) != 0 {
+		t.Fatalf("rules = %#v, want missing single-user rule hidden from normal status", rules)
 	}
 }
 

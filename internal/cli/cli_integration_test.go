@@ -195,6 +195,49 @@ func TestCLICleanupSmoke(t *testing.T) {
 	}
 }
 
+func TestCLIReconcileSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "legacy@example.com", 100, 200, 300)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable", "--email", "legacy@example.com", "--factor", "2")
+	db := openCLITestDB(t, dbPath)
+	execCLITestSQL(t, db, `DELETE FROM xui_factor_rule_clients`)
+	db.Close()
+
+	if output := run("reconcile", "--dry-run"); !strings.Contains(output, "orphaned=1") {
+		t.Fatalf("expected dry-run reconcile summary, got %q", output)
+	}
+	if output := run("reconcile"); !strings.Contains(output, "reconciled=1") {
+		t.Fatalf("expected reconcile summary, got %q", output)
+	}
+	if output := run("status"); !strings.Contains(output, "no active or paused rules") {
+		t.Fatalf("expected clean normal status, got %q", output)
+	}
+	if output := run("status", "--all"); !strings.Contains(output, "state=orphaned") {
+		t.Fatalf("expected orphaned rule in status --all, got %q", output)
+	}
+	if output := run("cleanup", "--dry-run"); !strings.Contains(output, "cleanup:") {
+		t.Fatalf("expected cleanup dry-run summary, got %q", output)
+	}
+	if output := run("tick"); !strings.Contains(output, "active=0") {
+		t.Fatalf("expected clean tick summary, got %q", output)
+	}
+}
+
 func TestCLIConfigFlagDoctorAndBackup(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "x-ui.db")

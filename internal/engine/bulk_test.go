@@ -402,11 +402,24 @@ func TestConsolidationDoesNotAdoptDisabledClientUnlessIncluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enable all default: %v", err)
 	}
-	if result.Adopted != 0 || countBulkRules(t, dbPath, store.StateMerged) != 0 {
-		t.Fatalf("disabled client was adopted without include flag: result=%#v", result)
+	if result.Adopted != 0 || countBulkRules(t, dbPath, store.StateMerged) != 0 || countBulkRules(t, dbPath, store.StateOrphaned) != 1 {
+		t.Fatalf("disabled client was not reconciled without include flag: result=%#v", result)
 	}
+}
 
-	result, err = svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID, IncludeDisabledClients: true})
+func TestConsolidationAdoptsDisabledClientWhenIncluded(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{
+		{id: 1, inboundID: 1, enable: 0, email: "disabled@example.com"},
+		{id: 2, inboundID: 1, enable: 1, email: "enabled@example.com"},
+	})
+	defer st.Close()
+
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "disabled@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable disabled: %v", err)
+	}
+	result, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID, IncludeDisabledClients: true})
 	if err != nil {
 		t.Fatalf("enable all include disabled: %v", err)
 	}

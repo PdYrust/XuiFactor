@@ -106,6 +106,34 @@ func (tx *Tx) RuleClient(ctx context.Context, ruleID, trafficID int64) (RuleClie
 	return scanRuleClient(row)
 }
 
+func (tx *Tx) RuleClientsForRule(ctx context.Context, ruleID int64) ([]RuleClient, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT rule_id, traffic_id, inbound_id, email,
+			last_up, last_down, last_all_time,
+			rem_up, rem_down, rem_all_time, missing_since, updated_at
+		FROM xui_factor_rule_clients
+		WHERE rule_id = ?
+		ORDER BY traffic_id
+	`, ruleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var clients []RuleClient
+	for rows.Next() {
+		rc, err := scanRuleClientRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		clients = append(clients, rc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return clients, nil
+}
+
 func (tx *Tx) RuleClientCount(ctx context.Context, ruleID int64) (int, error) {
 	var count int
 	if err := tx.QueryRowContext(ctx, `
@@ -333,6 +361,29 @@ func scanRuleClient(row *sql.Row) (RuleClient, error) {
 		return RuleClient{}, ErrNotFound
 	}
 	if err != nil {
+		return RuleClient{}, err
+	}
+	rc.MissingAt = nullablePtr(missingSince)
+	return rc, nil
+}
+
+func scanRuleClientRows(rows *sql.Rows) (RuleClient, error) {
+	var rc RuleClient
+	var missingSince sql.NullInt64
+	if err := rows.Scan(
+		&rc.RuleID,
+		&rc.TrafficID,
+		&rc.InboundID,
+		&rc.Email,
+		&rc.LastUp,
+		&rc.LastDown,
+		&rc.LastAllTime,
+		&rc.RemUp,
+		&rc.RemDown,
+		&rc.RemAllTime,
+		&missingSince,
+		&rc.UpdatedAt,
+	); err != nil {
 		return RuleClient{}, err
 	}
 	rc.MissingAt = nullablePtr(missingSince)

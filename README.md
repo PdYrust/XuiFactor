@@ -27,8 +27,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.2.1-beta_linux_amd64.tar.gz
-cd xui-factor_v0.2.1-beta_linux_amd64
+tar -xzf xui-factor_v0.2.2-beta_linux_amd64.tar.gz
+cd xui-factor_v0.2.2-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -61,6 +61,7 @@ xui-factor enable-all --factor 1.2 --limited-only
 xui-factor enable-all --factor 1.2 --once
 xui-factor disable --email User --inbound-id 1
 xui-factor disable-all
+xui-factor reconcile --dry-run
 xui-factor cleanup --dry-run
 xui-factor status
 xui-factor audit --email User --inbound-id 1
@@ -85,6 +86,8 @@ xui-factor enable-all --factor 1.2
 ```
 
 When possible, persistent `enable-all` also consolidates compatible active single-user rules into the scope while preserving their baselines.
+
+Use `xui-factor reconcile` to repair older metadata after upgrades. Normal status shows only effective active or paused rules; reconciled legacy rules are available through `status --all` until cleanup prunes them after retention.
 
 Apply a factor only to limited clients:
 
@@ -115,7 +118,7 @@ Disabling a rule does not revert previously factored traffic. Traffic recorded a
 
 XuiFactor keeps its own metadata bounded with automatic cleanup enabled by default. Missing client tracking is pruned after 30 seconds, disabled rules after 7 days, and audit events after 30 days.
 
-Use `xui-factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata and never modifies 3x-ui counters. SQLite `VACUUM` runs only when explicitly requested with `xui-factor cleanup --vacuum`.
+Use `xui-factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata, including orphaned legacy rules after retention, and never modifies 3x-ui counters. SQLite `VACUUM` runs only when explicitly requested with `xui-factor cleanup --vacuum`.
 
 ## Safety Notes
 
