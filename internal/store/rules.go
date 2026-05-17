@@ -9,7 +9,7 @@ import (
 )
 
 func (tx *Tx) FindClient(ctx context.Context, email string, inboundID *int64) (ClientTraffic, error) {
-	query := "SELECT id, inbound_id, email, up, down, all_time FROM client_traffics WHERE email=?"
+	query := "SELECT id, inbound_id, enable, email, up, down, all_time, total FROM client_traffics WHERE email=?"
 	args := []any{email}
 	if inboundID != nil {
 		query += " AND inbound_id=?"
@@ -26,7 +26,7 @@ func (tx *Tx) FindClient(ctx context.Context, email string, inboundID *int64) (C
 	var matches []ClientTraffic
 	for rows.Next() {
 		var c ClientTraffic
-		if err := rows.Scan(&c.ID, &c.InboundID, &c.Email, &c.Up, &c.Down, &c.AllTime); err != nil {
+		if err := rows.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.AllTime, &c.Total); err != nil {
 			return ClientTraffic{}, err
 		}
 		matches = append(matches, c)

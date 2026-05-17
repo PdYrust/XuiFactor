@@ -71,6 +71,8 @@ func (a *App) Run(args []string) int {
 		return a.runDoctor(ctx, common, args[1:])
 	case "status":
 		return a.runStatus(ctx, common, args[1:])
+	case "explain":
+		return a.runExplain(ctx, common, args[1:])
 	case "enable":
 		return a.runEnable(ctx, common, args[1:])
 	case "enable-all":
@@ -283,15 +285,16 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 }
 
 func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) int {
-	includeDisabled := false
-	for _, arg := range args {
-		switch arg {
-		case "--include-disabled", "--all":
-			includeDisabled = true
-		default:
-			a.printError(fmt.Errorf("status: unknown argument %q", arg))
-			return 2
-		}
+	flags, err := parseStatusArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	if flags.effective {
+		return a.runEffectiveStatus(ctx, opts, flags)
+	}
+	if flags.clients {
+		return a.runClientStatus(ctx, opts, flags)
 	}
 
 	svc, st, err := a.openReadOnlyService(ctx, opts)
@@ -316,7 +319,7 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		return 0
 	}
 
-	rules, err := svc.Status(ctx, includeDisabled)
+	rules, err := svc.Status(ctx, flags.includeDisabled)
 	if err != nil {
 		a.printError(err)
 		return 1
@@ -349,12 +352,12 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 		return 1
 	}
 	effectiveClients += effectiveOverrides
-	excludes, err := svc.Excludes(ctx, engine.ExcludeListRequest{IncludeInactive: includeDisabled})
+	excludes, err := svc.Excludes(ctx, engine.ExcludeListRequest{IncludeInactive: flags.includeDisabled})
 	if err != nil {
 		a.printError(err)
 		return 1
 	}
-	overrides, err := svc.Overrides(ctx, engine.OverrideListRequest{IncludeInactive: includeDisabled})
+	overrides, err := svc.Overrides(ctx, engine.OverrideListRequest{IncludeInactive: flags.includeDisabled})
 	if err != nil {
 		a.printError(err)
 		return 1
@@ -402,10 +405,142 @@ func (a *App) runStatus(ctx context.Context, opts commonOptions, args []string) 
 	out.Section("Service")
 	out.Field("enabled", service.Enabled)
 	out.Field("active", service.Active)
-	if includeDisabled && len(rules) == 0 {
+	if flags.includeDisabled && len(rules) == 0 {
 		out.Section("Rules")
 		out.Field("entries", 0)
 	}
+	return 0
+}
+
+func (a *App) runEffectiveStatus(ctx context.Context, opts commonOptions, flags statusFlags) int {
+	svc, st, err := a.openReadOnlyService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	result, err := svc.EffectiveStatus(ctx, engine.EffectiveStatusRequest{InboundID: flags.inboundID})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	out := newOutput(a.Out)
+	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
+	out.Section("Effective Status")
+	out.Field("scopes", result.Scopes)
+	out.Field("excludes", len(result.Excludes))
+	out.Field("overrides", len(result.Overrides))
+	out.Field("effective factored clients", result.EffectiveFactoredClients)
+	out.Field("excluded clients", result.ExcludedClients)
+	out.Field("overridden clients", result.OverriddenClients)
+
+	scopes := make([]store.Rule, 0)
+	for _, rule := range result.Rules {
+		if rule.Scope != nil && rule.State == store.StateActive && statusRuleMatchesInbound(rule, flags.inboundID) {
+			scopes = append(scopes, rule)
+		}
+	}
+	if len(scopes) > 0 {
+		out.Section("Scopes")
+		for _, rule := range scopes {
+			out.Rule(rule)
+		}
+	}
+	if len(result.Excludes) > 0 || len(result.Overrides) > 0 {
+		out.Section("Policies")
+		for _, policy := range result.Excludes {
+			out.Exclude(policy)
+		}
+		for _, policy := range result.Overrides {
+			out.Override(policy)
+		}
+	}
+	return 0
+}
+
+func (a *App) runClientStatus(ctx context.Context, opts commonOptions, flags statusFlags) int {
+	svc, st, err := a.openReadOnlyService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	limit := 0
+	if flags.inboundID == nil {
+		limit = engine.DefaultClientStatusLimit
+	}
+	result, err := svc.ClientStatus(ctx, engine.ClientStatusRequest{InboundID: flags.inboundID, Limit: limit})
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	out := newOutput(a.Out)
+	out.Title("Clients")
+	if len(result.Clients) == 0 {
+		out.Field("entries", 0)
+		return 0
+	}
+	for _, item := range result.Clients {
+		out.ClientDecision(item)
+	}
+	if result.Truncated {
+		out.Section("Hint")
+		out.Field("showing", result.Limit)
+		out.Field("run", "xui-factor status --clients --inbound-id ID")
+	}
+	return 0
+}
+
+func (a *App) runExplain(ctx context.Context, opts commonOptions, args []string) int {
+	flags, err := parseExplainArgs(args)
+	if err != nil {
+		a.printError(err)
+		return 2
+	}
+	svc, st, err := a.openReadOnlyService(ctx, opts)
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	defer st.Close()
+
+	result, err := svc.Explain(ctx, engine.ExplainRequest{Email: flags.email, InboundID: flags.inboundID})
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status --clients --inbound-id ID")
+			return commandErrorCode(err)
+		}
+		a.printError(err)
+		return commandErrorCode(err)
+	}
+	out := newOutput(a.Out)
+	out.Summary("explain", "effective decision")
+	out.Section("Target")
+	out.Field("email", result.Client.Email)
+	out.Field("inbound", result.Client.InboundID)
+	out.Field("traffic_id", result.Client.ID)
+	out.Section("Decision")
+	out.Field("effective factor", decisionFactor(result.Decision))
+	out.Field("source", sourceLabel(result.Decision.SourceType))
+	out.Field("mutates traffic", yesNo(decisionMutatesTraffic(result.Decision)))
+	if result.Baseline != nil {
+		out.Section("Baseline")
+		out.Field("last up", result.Baseline.LastUp)
+		out.Field("last down", result.Baseline.LastDown)
+		out.Field("last all time", result.Baseline.LastAllTime)
+	}
+	if len(result.Decision.Matched) > 0 {
+		out.Section("Matched")
+		for _, match := range result.Decision.Matched {
+			out.Match(match)
+		}
+	}
+	out.Section("Precedence")
+	out.Field("order", policyPrecedenceText())
+	out.Section("Result")
+	out.Field("status", engine.ExplainResultText(result))
 	return 0
 }
 
@@ -1304,6 +1439,18 @@ type overridesFlags struct {
 	includeInactive bool
 }
 
+type statusFlags struct {
+	includeDisabled bool
+	effective       bool
+	clients         bool
+	inboundID       *int64
+}
+
+type explainFlags struct {
+	email     string
+	inboundID *int64
+}
+
 type cleanupFlags struct {
 	dryRun    bool
 	olderThan time.Duration
@@ -1629,6 +1776,91 @@ func parseOverridesArgs(args []string) (overridesFlags, error) {
 	return flags, nil
 }
 
+func parseStatusArgs(args []string) (statusFlags, error) {
+	var flags statusFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--include-disabled", arg == "--all":
+			flags.includeDisabled = true
+		case arg == "--effective":
+			flags.effective = true
+		case arg == "--clients":
+			flags.clients = true
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		default:
+			return flags, fmt.Errorf("status: unknown argument %q", arg)
+		}
+	}
+	if flags.effective && flags.clients {
+		return flags, errors.New("status: --effective and --clients cannot be used together")
+	}
+	if flags.inboundID != nil && !flags.effective && !flags.clients {
+		return flags, errors.New("status: --inbound-id requires --effective or --clients")
+	}
+	return flags, nil
+}
+
+func parseExplainArgs(args []string) (explainFlags, error) {
+	var flags explainFlags
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--email":
+			value, next, err := readFlagValue(args, i, "--email")
+			if err != nil {
+				return flags, err
+			}
+			flags.email = value
+			i = next
+		case strings.HasPrefix(arg, "--email="):
+			flags.email = strings.TrimPrefix(arg, "--email=")
+		case arg == "--inbound-id":
+			value, next, err := readFlagValue(args, i, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			inboundID, err := parsePositiveInt64(value, "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+			i = next
+		case strings.HasPrefix(arg, "--inbound-id="):
+			inboundID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--inbound-id="), "--inbound-id")
+			if err != nil {
+				return flags, err
+			}
+			flags.inboundID = &inboundID
+		default:
+			return flags, fmt.Errorf("explain: unknown argument %q", arg)
+		}
+	}
+	if strings.TrimSpace(flags.email) == "" {
+		return flags, errors.New("explain: --email is required")
+	}
+	if flags.inboundID == nil {
+		return flags, errors.New("explain: --inbound-id is required")
+	}
+	return flags, nil
+}
+
 func parseCleanupArgs(args []string) (cleanupFlags, error) {
 	var flags cleanupFlags
 	for i := 0; i < len(args); i++ {
@@ -1853,6 +2085,7 @@ Commands:
   version    Print version metadata
   doctor     Check database schema and metadata
   status     List effective active and paused rules
+  explain    Explain one client's effective decision
   enable     Enable a factor rule
   enable-all Enable factor rules for selected clients
   exclude    Exclude one client from factor decisions
@@ -1885,6 +2118,9 @@ Examples:
   %s enable-all --factor 1.2
   %s enable-all --factor 1.2 --limited-only
   %s enable-all --factor 1.2 --once
+  %s explain --email user@example.com --inbound-id 1
+  %s status --effective
+  %s status --clients --inbound-id 1
   %s exclude --email user@example.com --inbound-id 1
   %s excludes
   %s override --email user@example.com --inbound-id 1 --factor 1.2
@@ -1897,7 +2133,7 @@ Examples:
   %s doctor
   %s tick
   %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 func (a *App) printVersion(w io.Writer) {

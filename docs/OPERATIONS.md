@@ -13,8 +13,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.3.2-beta_linux_amd64.tar.gz
-cd xui-factor_v0.3.2-beta_linux_amd64
+tar -xzf xui-factor_v0.3.3-beta_linux_amd64.tar.gz
+cd xui-factor_v0.3.3-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -169,7 +169,35 @@ xui-factor remove-override --email User --inbound-id 1
 
 An override is tied to the current traffic id, inbound id, and email. It replaces the broader matched factor for that client and does not stack with a scope factor. Exclude policies still win over overrides. Previously factored traffic remains unchanged, and removing an override does not retroactively change traffic that arrived while the override was active.
 
-## 12. Pause and resume
+## 12. Explain and effective status
+
+Inspect one client's final effective decision:
+
+```sh
+xui-factor explain --email User --inbound-id 1
+```
+
+Show grouped effective policy totals:
+
+```sh
+xui-factor status --effective
+```
+
+Show client-level effective factors for one inbound:
+
+```sh
+xui-factor status --clients --inbound-id 1
+```
+
+Effective views use the same precedence as tick:
+
+```text
+exclude > override > single-user rule > inbound scope > global scope
+```
+
+Explain and effective status are read-only. They do not create audit events, refresh baselines, or modify 3x-ui counters.
+
+## 13. Pause and resume
 
 Pause one rule without changing counters:
 
@@ -192,7 +220,7 @@ xui-factor resume-all
 
 Traffic accumulated while a rule is paused is not factored when the rule resumes.
 
-## 13. Disable behavior
+## 14. Disable behavior
 
 Disable one rule:
 
@@ -208,7 +236,7 @@ xui-factor disable-all
 
 Disabling a rule does not subtract previously factored traffic. After disabling, future traffic is counted normally by 3x-ui.
 
-## 14. One-shot tick
+## 15. One-shot tick
 
 Run one factor tick manually:
 
@@ -218,7 +246,7 @@ xui-factor tick
 
 This is useful after enabling a rule, during maintenance checks, or before starting the daemon service.
 
-## 15. Daemon service operation
+## 16. Daemon service operation
 
 Install and update enable and start the service by default on systemd hosts. Check service state:
 
@@ -246,7 +274,7 @@ journalctl -u xui-factor.service -f
 
 The service runs `xui-factor` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
 
-## 16. Status and audit
+## 17. Status and audit
 
 List effective active and paused rules:
 
@@ -257,6 +285,8 @@ xui-factor status
 Normal status hides orphaned, merged, and ineffective legacy rules. Persistent scopes remain visible with their current materialized client count.
 
 Active excludes and overrides are shown as policies. Scope lines show an `effective=` count when policies reduce the number of clients that currently receive the scope factor.
+
+Use `status --effective` to inspect grouped final decisions, and `status --clients --inbound-id ID` to inspect client-level effective factors without large unfiltered output.
 
 List all rules, including inactive metadata:
 
@@ -272,7 +302,7 @@ xui-factor audit --email User --inbound-id 1
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
 
-## 17. Reconcile legacy metadata
+## 18. Reconcile legacy metadata
 
 Reconcile older active single-user rules after upgrading or after manual database repair:
 
@@ -283,7 +313,7 @@ xui-factor reconcile
 
 Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible legacy rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned legacy rules are inactive and are pruned later by cleanup retention.
 
-## 18. Metadata cleanup
+## 19. Metadata cleanup
 
 The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id, inbound id, and email. Missing client tracking is pruned after the grace period.
 
@@ -311,7 +341,7 @@ Cleanup prunes only XuiFactor metadata, including inactive excludes and override
 xui-factor cleanup --vacuum
 ```
 
-## 19. Update workflow
+## 20. Update workflow
 
 From a new release package, run:
 
@@ -321,7 +351,7 @@ sudo ./scripts/update.sh
 
 The update workflow preserves existing config, refreshes installed package files, enables `xui-factor.service`, and restarts it by default. Use `--no-start` or `--no-restart` to skip restart, and `--no-enable` to avoid enabling service startup.
 
-## 20. Uninstall workflow
+## 21. Uninstall workflow
 
 Remove the installed binary, service, and shared package files while preserving config and backups:
 
@@ -337,7 +367,7 @@ sudo ./scripts/uninstall.sh --purge
 
 Uninstall and purge must not remove `/etc/x-ui/x-ui.db`.
 
-## 21. Recovery expectations
+## 22. Recovery expectations
 
 XuiFactor does not automatically restore backups. To recover from a selected backup:
 
@@ -351,13 +381,14 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 
 Keep backup files until the recovered server has been verified.
 
-## 22. Safety checklist
+## 23. Safety checklist
 
 - Run `xui-factor doctor` first.
 - Run `xui-factor backup` before broad changes.
 - Test a single user before `enable-all`.
 - Use `xui-factor exclude --email User --inbound-id 1` for clients that must not receive a broad factor.
 - Use `xui-factor override --email User --inbound-id 1 --factor 1.2` when one exact client needs a different future factor.
+- Use `xui-factor explain --email User --inbound-id 1` when the final decision is unclear.
 - Use `--limited-only` if unlimited clients should be skipped.
 - Run `xui-factor reconcile --dry-run` after upgrades with legacy active rules.
 - Run `xui-factor cleanup --dry-run` before manual metadata cleanup.

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PdYrust/XuiFactor/internal/policy"
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
@@ -262,6 +263,159 @@ func TestOverrideSameEmailDifferentTrafficIsDifferentClient(t *testing.T) {
 	}
 }
 
+func TestExplainShowsExcludeWinningOverOverrideAndScope(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if _, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+
+	result, err := svc.Explain(ctx, ExplainRequest{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if result.Client.ID != 1 || result.Decision.SourceType != policy.SourceExclude || result.Decision.FactorPPM != 0 {
+		t.Fatalf("decision = %#v, want exclude winner for traffic 1", result.Decision)
+	}
+	if result.Decision.Target != nil {
+		t.Fatalf("target = %#v, want no mutation target for exclude", result.Decision.Target)
+	}
+	if len(result.Decision.Matched) != 3 {
+		t.Fatalf("matched = %d, want exclude override scope", len(result.Decision.Matched))
+	}
+}
+
+func TestExplainShowsOverrideWinningOverScope(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+
+	result, err := svc.Explain(ctx, ExplainRequest{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if result.Decision.SourceType != policy.SourceUserOverride || result.Decision.FactorPPM != 1_200_000 || result.Decision.Target == nil {
+		t.Fatalf("decision = %#v, want override winner with materialized target", result.Decision)
+	}
+	if result.Baseline == nil || result.Baseline.TrafficID != 1 {
+		t.Fatalf("baseline = %#v, want current rule-client baseline", result.Baseline)
+	}
+}
+
+func TestExplainShowsScopeWinningWithoutPolicy(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+
+	result, err := svc.Explain(ctx, ExplainRequest{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if result.Decision.SourceType != policy.SourceInboundScope || result.Decision.FactorPPM != 2_000_000 || result.Decision.Target == nil {
+		t.Fatalf("decision = %#v, want inbound scope winner", result.Decision)
+	}
+}
+
+func TestExplainShowsNoFactorWithoutMatchingMetadata(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	result, err := svc.Explain(ctx, ExplainRequest{Email: "user@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if result.Decision.SourceType != policy.SourceNone || result.Decision.Target != nil || len(result.Decision.Matched) != 0 {
+		t.Fatalf("decision = %#v, want no factor", result.Decision)
+	}
+}
+
+func TestExplainUsesExactTrafficIdentity(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, _ := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "same@example.com", up: 100, down: 200, allTime: 300},
+		{id: 2, inboundID: 11, email: "same@example.com", up: 400, down: 500, allTime: 900},
+	})
+	defer st.Close()
+
+	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "same@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+
+	first, err := svc.Explain(ctx, ExplainRequest{Email: "same@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("explain first: %v", err)
+	}
+	otherInbound := int64(11)
+	second, err := svc.Explain(ctx, ExplainRequest{Email: "same@example.com", InboundID: &otherInbound})
+	if err != nil {
+		t.Fatalf("explain second: %v", err)
+	}
+	if first.Client.ID != 1 || first.Decision.SourceType != policy.SourceUserOverride {
+		t.Fatalf("first = %#v, want traffic 1 override", first)
+	}
+	if second.Client.ID != 2 || second.Decision.SourceType != policy.SourceNone {
+		t.Fatalf("second = %#v, want traffic 2 no factor", second)
+	}
+}
+
+func TestExplainIsReadOnly(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+	})
+	defer st.Close()
+
+	db := openTestDB(t, dbPath)
+	before := countAllEngineEvents(t, db)
+	db.Close()
+	if _, err := svc.Explain(ctx, ExplainRequest{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	db = openTestDB(t, dbPath)
+	after := countAllEngineEvents(t, db)
+	db.Close()
+	if after != before {
+		t.Fatalf("event count after explain = %d, want %d", after, before)
+	}
+}
+
 func TestDisableKeepsTrafficCounters(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newTestService(t, []testTraffic{
@@ -445,6 +599,15 @@ func countEngineEvents(t *testing.T, db *sql.DB, eventType string) int {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_events WHERE event_type=?`, eventType).Scan(&count); err != nil {
 		t.Fatalf("count events: %v", err)
+	}
+	return count
+}
+
+func countAllEngineEvents(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM xui_factor_events`).Scan(&count); err != nil {
+		t.Fatalf("count all events: %v", err)
 	}
 	return count
 }

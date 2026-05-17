@@ -2,6 +2,27 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.3.3-beta - Unreleased
+
+### Added
+
+- `explain` command for one-client effective decision inspection.
+- `status --effective` summary view for final policy outcomes.
+- `status --clients` client-level effective factor view with inbound filtering.
+- v0.3.3-beta release notes.
+
+### Changed
+
+- Explain and effective status reuse the policy decision layer used by tick.
+- Status client output shows effective factor, source, traffic id, inbound, and state.
+- `status --clients` without an inbound filter limits output and prints a hint to avoid noisy terminal output.
+
+### Safety
+
+- Explain and effective status are read-only and do not create audit events.
+- Effective views preserve the same precedence order as tick: exclude, override, single-user rule, inbound scope, global scope.
+- Effective views do not mutate counters or baselines.
+
 ## v0.3.2-beta - Unreleased
 
 ### Added

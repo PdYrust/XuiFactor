@@ -55,6 +55,8 @@ type Decision struct {
 
 var ErrAmbiguousEffectiveTarget = errors.New("ambiguous effective target")
 
+const PrecedenceDescription = "exclude > override > single-user rule > inbound scope > global scope"
+
 func ActiveRuleCandidates(targets []store.ActiveRuleClient) []Candidate {
 	candidates := make([]Candidate, 0, len(targets))
 	for _, target := range targets {
@@ -72,6 +74,69 @@ func ActiveRuleCandidates(targets []store.ActiveRuleClient) []Candidate {
 		})
 	}
 	return candidates
+}
+
+func ClientCandidates(client store.ClientTraffic, targets []store.ActiveRuleClient, excludes []store.ExcludePolicy, overrides []store.OverridePolicy) []Candidate {
+	matchingTargets := make([]store.ActiveRuleClient, 0, 2)
+	for _, target := range targets {
+		if target.Client.TrafficID == client.ID && target.Client.InboundID == client.InboundID && target.Client.Email == client.Email {
+			matchingTargets = append(matchingTargets, target)
+		}
+	}
+
+	candidates := ActiveRuleCandidates(matchingTargets)
+	overrideCandidates := OverrideCandidatesForActiveTargets(overrides, matchingTargets)
+	candidates = append(candidates, overrideCandidates...)
+	excludeCandidates := ExcludeCandidatesForActiveTargets(excludes, matchingTargets)
+	candidates = append(candidates, excludeCandidates...)
+
+	if len(excludeCandidates) == 0 {
+		for _, exclude := range excludes {
+			if exactPolicyMatch(client, exclude.TrafficID, exclude.InboundID, exclude.Email) {
+				candidates = append(candidates, Candidate{
+					SourceType: SourceExclude,
+					RuleID:     exclude.ID,
+					TrafficID:  exclude.TrafficID,
+					InboundID:  exclude.InboundID,
+					Email:      exclude.Email,
+					FactorPPM:  0,
+					Reason:     "exclude policy",
+				})
+				break
+			}
+		}
+	}
+	if len(overrideCandidates) == 0 {
+		for _, override := range overrides {
+			if exactPolicyMatch(client, override.TrafficID, override.InboundID, override.Email) {
+				candidates = append(candidates, Candidate{
+					SourceType: SourceUserOverride,
+					RuleID:     override.ID,
+					TrafficID:  override.TrafficID,
+					InboundID:  override.InboundID,
+					Email:      override.Email,
+					FactorPPM:  override.FactorPPM,
+					Reason:     "user override policy without active rule target",
+				})
+				break
+			}
+		}
+	}
+	return candidates
+}
+
+func DecideClient(client store.ClientTraffic, candidates []Candidate) (Decision, error) {
+	if len(candidates) == 0 {
+		return Decision{
+			TrafficID:  client.ID,
+			InboundID:  client.InboundID,
+			Email:      client.Email,
+			SourceType: SourceNone,
+			FactorPPM:  0,
+			Reason:     "no active matching rule, scope, override, or exclude",
+		}, nil
+	}
+	return decideOne(client.ID, candidates)
 }
 
 func DecideActiveRuleClients(targets []store.ActiveRuleClient) ([]Decision, error) {
@@ -155,6 +220,10 @@ func OverrideCandidatesForActiveTargets(overrides []store.OverridePolicy, target
 		})
 	}
 	return candidates
+}
+
+func exactPolicyMatch(client store.ClientTraffic, trafficID, inboundID int64, email string) bool {
+	return client.ID == trafficID && client.InboundID == inboundID && client.Email == email
 }
 
 func Decide(candidates []Candidate) ([]Decision, error) {

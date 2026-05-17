@@ -97,6 +97,48 @@ func (tx *Tx) ClientTrafficByID(ctx context.Context, trafficID int64) (ClientTra
 	return c, nil
 }
 
+func (tx *Tx) ListClientTraffics(ctx context.Context, filter ClientListFilter) ([]ClientTraffic, bool, error) {
+	query := `
+		SELECT id, inbound_id, enable, email, up, down, all_time, total
+		FROM client_traffics
+		WHERE email <> ''`
+	args := make([]any, 0, 2)
+	if filter.InboundID != nil {
+		query += " AND inbound_id = ?"
+		args = append(args, *filter.InboundID)
+	}
+	query += " ORDER BY inbound_id, email, id"
+	limit := filter.Limit
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit+1)
+	}
+
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	clients := make([]ClientTraffic, 0)
+	for rows.Next() {
+		var c ClientTraffic
+		if err := rows.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.AllTime, &c.Total); err != nil {
+			return nil, false, err
+		}
+		clients = append(clients, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := false
+	if limit > 0 && len(clients) > limit {
+		truncated = true
+		clients = clients[:limit]
+	}
+	return clients, truncated, nil
+}
+
 func (tx *Tx) UpdateClientCountersCAS(ctx context.Context, current ClientTraffic, newUp, newDown, newAllTime int64) (bool, error) {
 	result, err := tx.ExecContext(ctx, `
 		UPDATE client_traffics

@@ -184,6 +184,15 @@ func (s *Store) tableExists(ctx context.Context, table string) (bool, error) {
 	return err == nil, wrapSQLiteError("read sqlite schema", err)
 }
 
+func (tx *Tx) TableExists(ctx context.Context, table string) (bool, error) {
+	var name string
+	err := tx.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, wrapSQLiteError("read sqlite schema", err)
+}
+
 func (s *Store) tableColumns(ctx context.Context, table string) (map[string]bool, error) {
 	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
@@ -250,6 +259,33 @@ func (s *Store) WithImmediateTx(ctx context.Context, fn func(*Tx) error) (err er
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return wrapSQLiteError("commit transaction", err)
+	}
+	committed = true
+	return nil
+}
+
+func (s *Store) WithReadTx(ctx context.Context, fn func(*Tx) error) (err error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		return wrapSQLiteError("begin read transaction", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
+
+	if err := fn(&Tx{conn: conn}); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return wrapSQLiteError("commit read transaction", err)
 	}
 	committed = true
 	return nil
