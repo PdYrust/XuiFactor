@@ -30,7 +30,7 @@ func TestCLITickSmoke(t *testing.T) {
 	run("enable", "--email", "smoke@example.com", "--factor", "5")
 	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
 
-	if output := run("tick"); !strings.Contains(output, "applied=1") {
+	if output := run("tick"); !strings.Contains(output, "applied: 1") {
 		t.Fatalf("expected tick apply output, got %q", output)
 	}
 	if output := run("status"); !strings.Contains(output, "state=active") {
@@ -67,19 +67,19 @@ func TestCLIBulkLifecycleSmoke(t *testing.T) {
 		return out.String()
 	}
 
-	if output := run("enable-all", "--factor", "2"); !strings.Contains(output, "mode=persistent") || !strings.Contains(output, "changed=2") {
+	if output := run("enable-all", "--factor", "2"); !strings.Contains(output, "mode: persistent") || !strings.Contains(output, "enrolled: 2") {
 		t.Fatalf("expected enable-all summary, got %q", output)
 	}
-	if output := run("status"); !strings.Contains(output, "state=active") || !strings.Contains(output, "scope=persistent") {
+	if output := run("status"); !strings.Contains(output, "state=active") || !strings.Contains(output, "scope=global") {
 		t.Fatalf("expected active scope status, got %q", output)
 	}
-	if output := run("pause-all"); !strings.Contains(output, "changed=1") {
+	if output := run("pause-all"); !strings.Contains(output, "changed: 1") {
 		t.Fatalf("expected pause-all summary, got %q", output)
 	}
-	if output := run("resume-all"); !strings.Contains(output, "changed=1") {
+	if output := run("resume-all"); !strings.Contains(output, "changed: 1") {
 		t.Fatalf("expected resume-all summary, got %q", output)
 	}
-	if output := run("disable-all"); !strings.Contains(output, "changed=1") {
+	if output := run("disable-all"); !strings.Contains(output, "changed: 1") {
 		t.Fatalf("expected disable-all summary, got %q", output)
 	}
 }
@@ -103,20 +103,20 @@ func TestCLIPersistentScopeSmoke(t *testing.T) {
 		return out.String()
 	}
 
-	if output := run("enable-all", "--inbound-id", "1", "--factor", "2"); !strings.Contains(output, "mode=persistent") || !strings.Contains(output, "changed=1") {
+	if output := run("enable-all", "--inbound-id", "1", "--factor", "2"); !strings.Contains(output, "mode: persistent") || !strings.Contains(output, "enrolled: 1") {
 		t.Fatalf("expected inbound persistent summary, got %q", output)
 	}
-	if output := run("status"); !strings.Contains(output, "scope=persistent,inbound=1") || !strings.Contains(output, "clients=1") {
+	if output := run("status"); !strings.Contains(output, "scope=inbound:1") || !strings.Contains(output, "clients=1") {
 		t.Fatalf("expected inbound scope status, got %q", output)
 	}
 	insertCLITestTraffic(t, dbPath, 3, 1, "c@example.com", 1000, 2000, 3000)
-	if output := run("tick"); !strings.Contains(output, "enrolled=1") {
+	if output := run("tick"); !strings.Contains(output, "enrolled: 1") {
 		t.Fatalf("expected tick enrollment, got %q", output)
 	}
 	if output := run("audit"); !strings.Contains(output, "scope_auto_enroll") {
 		t.Fatalf("expected scope enrollment audit, got %q", output)
 	}
-	if output := run("disable-all"); !strings.Contains(output, "changed=1") {
+	if output := run("disable-all"); !strings.Contains(output, "changed: 1") {
 		t.Fatalf("expected disable-all summary, got %q", output)
 	}
 }
@@ -139,12 +139,42 @@ func TestCLIEnableAllOnceSmoke(t *testing.T) {
 		return out.String()
 	}
 
-	if output := run("enable-all", "--inbound-id", "1", "--factor", "2", "--once"); !strings.Contains(output, "mode=snapshot") || !strings.Contains(output, "changed=1") {
+	if output := run("enable-all", "--inbound-id", "1", "--factor", "2", "--once"); !strings.Contains(output, "mode: snapshot") || !strings.Contains(output, "enrolled: 1") {
 		t.Fatalf("expected snapshot summary, got %q", output)
 	}
 	insertCLITestTraffic(t, dbPath, 2, 1, "future@example.com", 1000, 2000, 3000)
-	if output := run("tick"); !strings.Contains(output, "enrolled=0") {
+	if output := run("tick"); !strings.Contains(output, "enrolled: 0") {
 		t.Fatalf("expected no snapshot enrollment, got %q", output)
+	}
+}
+
+func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+
+	var out, errOut bytes.Buffer
+	code := New(&out, &errOut).Run([]string{
+		"--database", dbPath,
+		"enable",
+		"--email", "missing@example.com",
+		"--inbound-id", "1",
+		"--factor", "2",
+	})
+	if code == 0 {
+		t.Fatalf("enable succeeded for missing client, stdout=%q", out.String())
+	}
+	output := errOut.String()
+	for _, want := range []string{
+		"error: client not found",
+		"Target",
+		"email: missing@example.com",
+		"inbound: 1",
+		"Hint",
+		"run: xui-factor status",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("enable error output missing %q: %q", want, output)
+		}
 	}
 }
 
@@ -166,19 +196,19 @@ func TestCLICleanupSmoke(t *testing.T) {
 		return out.String()
 	}
 
-	if output := run("enable-all", "--inbound-id", "1", "--factor", "2"); !strings.Contains(output, "mode=persistent") {
+	if output := run("enable-all", "--inbound-id", "1", "--factor", "2"); !strings.Contains(output, "mode: persistent") {
 		t.Fatalf("expected enable-all summary, got %q", output)
 	}
-	if output := run("tick"); !strings.Contains(output, "active=") {
+	if output := run("tick"); !strings.Contains(output, "active clients:") {
 		t.Fatalf("expected tick summary, got %q", output)
 	}
-	if output := run("status"); !strings.Contains(output, "scope=persistent,inbound=1") {
+	if output := run("status"); !strings.Contains(output, "scope=inbound:1") {
 		t.Fatalf("expected status scope output, got %q", output)
 	}
 	if output := run("audit"); !strings.Contains(output, "rule_enabled") {
 		t.Fatalf("expected audit output, got %q", output)
 	}
-	if output := run("cleanup", "--dry-run"); !strings.Contains(output, "vacuum_run=false") {
+	if output := run("cleanup", "--dry-run"); !strings.Contains(output, "vacuum run: no") {
 		t.Fatalf("expected dry-run cleanup summary, got %q", output)
 	}
 	if output := run("cleanup"); !strings.Contains(output, "cleanup:") {
@@ -187,10 +217,10 @@ func TestCLICleanupSmoke(t *testing.T) {
 	if output := run("cleanup", "--older-than", "1h"); !strings.Contains(output, "cleanup:") {
 		t.Fatalf("expected older-than cleanup summary, got %q", output)
 	}
-	if output := run("cleanup", "--vacuum"); !strings.Contains(output, "vacuum_run=true") {
+	if output := run("cleanup", "--vacuum"); !strings.Contains(output, "vacuum run: yes") {
 		t.Fatalf("expected vacuum cleanup summary, got %q", output)
 	}
-	if output := run("disable-all"); !strings.Contains(output, "changed=1") {
+	if output := run("disable-all"); !strings.Contains(output, "changed: 1") {
 		t.Fatalf("expected disable-all summary, got %q", output)
 	}
 }
@@ -218,13 +248,13 @@ func TestCLIReconcileSmoke(t *testing.T) {
 	execCLITestSQL(t, db, `DELETE FROM xui_factor_rule_clients`)
 	db.Close()
 
-	if output := run("reconcile", "--dry-run"); !strings.Contains(output, "orphaned=1") {
+	if output := run("reconcile", "--dry-run"); !strings.Contains(output, "orphaned: 1") {
 		t.Fatalf("expected dry-run reconcile summary, got %q", output)
 	}
-	if output := run("reconcile"); !strings.Contains(output, "reconciled=1") {
+	if output := run("reconcile"); !strings.Contains(output, "reconciled: 1") {
 		t.Fatalf("expected reconcile summary, got %q", output)
 	}
-	if output := run("status"); !strings.Contains(output, "no active or paused rules") {
+	if output := run("status"); !strings.Contains(output, "active rules: 0") {
 		t.Fatalf("expected clean normal status, got %q", output)
 	}
 	if output := run("status", "--all"); !strings.Contains(output, "state=orphaned") {
@@ -233,7 +263,7 @@ func TestCLIReconcileSmoke(t *testing.T) {
 	if output := run("cleanup", "--dry-run"); !strings.Contains(output, "cleanup:") {
 		t.Fatalf("expected cleanup dry-run summary, got %q", output)
 	}
-	if output := run("tick"); !strings.Contains(output, "active=0") {
+	if output := run("tick"); !strings.Contains(output, "active clients: 0") {
 		t.Fatalf("expected clean tick summary, got %q", output)
 	}
 }
@@ -256,18 +286,19 @@ func TestCLIConfigFlagDoctorAndBackup(t *testing.T) {
 	}
 	doctorOutput := out.String()
 	for _, want := range []string{
-		"XuiFactor doctor",
+		"XuiFactor ",
 		"config: " + configPath,
 		"database: " + dbPath,
-		"OK database read",
-		"OK database write",
-		"OK schema",
-		"WARN metadata unavailable: metadata tables are missing",
-		"OK backup dir " + backupDir,
-		"service installed:",
-		"service enabled:",
-		"service active:",
-		"WARN rules unavailable: metadata tables are missing",
+		"database read: ok",
+		"database write: ok",
+		"schema: ok",
+		"metadata: warning",
+		"backup dir: " + backupDir,
+		"installed:",
+		"enabled:",
+		"active:",
+		"warning: metadata unavailable: metadata tables are missing",
+		"warning: rules unavailable: metadata tables are missing",
 		"doctor: OK",
 	} {
 		if !strings.Contains(doctorOutput, want) {
@@ -284,10 +315,10 @@ func TestCLIConfigFlagDoctorAndBackup(t *testing.T) {
 		t.Fatalf("backup exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
 	}
 	backupOutput := out.String()
-	if !strings.Contains(backupOutput, "backup: created path="+backupDir) {
+	if !strings.Contains(backupOutput, "backup: created") || !strings.Contains(backupOutput, "path: "+backupDir) {
 		t.Fatalf("unexpected backup output: %q", backupOutput)
 	}
-	if !strings.Contains(backupOutput, "restore: manual only") {
+	if !strings.Contains(backupOutput, "mode: manual only") {
 		t.Fatalf("backup output missing restore guidance: %q", backupOutput)
 	}
 	entries, err := os.ReadDir(backupDir)
@@ -314,9 +345,9 @@ func TestCLIDoctorReportsServiceState(t *testing.T) {
 	}
 	output := out.String()
 	for _, want := range []string{
-		"service installed: yes",
-		"service enabled: yes",
-		"service active: yes",
+		"installed: yes",
+		"enabled: yes",
+		"active: yes",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("doctor output missing %q: %q", want, output)
@@ -345,7 +376,7 @@ func TestCLIDoctorWarnsWhenActiveRulesExistButServiceInactive(t *testing.T) {
 		t.Fatalf("doctor exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
 	}
 	output := out.String()
-	if !strings.Contains(output, "service enabled: no") || !strings.Contains(output, "service active: no") {
+	if !strings.Contains(output, "enabled: no") || !strings.Contains(output, "active: no") {
 		t.Fatalf("doctor did not report inactive service: %q", output)
 	}
 	if !strings.Contains(output, "warning: active rules exist but xui-factor.service is not running") {
@@ -508,7 +539,7 @@ func TestCLIDoctorPartialMetadataIsReadOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("doctor exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
 	}
-	if !strings.Contains(out.String(), "WARN metadata unavailable") {
+	if !strings.Contains(out.String(), "metadata: warning") || !strings.Contains(out.String(), "warning: metadata unavailable") {
 		t.Fatalf("expected metadata warning, got %q", out.String())
 	}
 }
