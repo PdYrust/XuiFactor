@@ -12,6 +12,7 @@ import (
 
 	"github.com/PdYrust/XuiFactor/internal/config"
 	"github.com/PdYrust/XuiFactor/internal/engine"
+	"github.com/PdYrust/XuiFactor/internal/policy"
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
@@ -399,6 +400,13 @@ func TestOverrideClientUsesOverrideFactorWhenInboundScopeMatches(t *testing.T) {
 	}
 	if _, err := h.engine.Override(ctx, engine.OverrideRequest{Email: "override@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
 		t.Fatalf("override: %v", err)
+	}
+	explain, err := h.engine.Explain(ctx, engine.ExplainRequest{Email: "override@example.com", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if explain.Decision.SourceType != policy.SourceUserOverride || explain.Decision.FactorPPM != 1_200_000 {
+		t.Fatalf("explain decision = %#v, want override before tick", explain.Decision)
 	}
 	setCounters(t, h.dbPath, 1, 110, 220, 330)
 	setCounters(t, h.dbPath, 2, 410, 520, 930)

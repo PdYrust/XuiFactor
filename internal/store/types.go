@@ -155,6 +155,11 @@ type ClientFilter struct {
 	IncludeDisabledClients bool
 }
 
+type ClientListFilter struct {
+	InboundID *int64
+	Limit     int
+}
+
 type CleanupOptions struct {
 	Now                   int64
 	MissingClientGrace    int64

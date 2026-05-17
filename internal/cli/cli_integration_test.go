@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,6 +307,65 @@ func TestCLIDoctorReportsOverrideCounts(t *testing.T) {
 	output := run("doctor")
 	if !strings.Contains(output, "active overrides: 1") || !strings.Contains(output, "inactive overrides: 0") {
 		t.Fatalf("expected doctor override counts, got %q", output)
+	}
+}
+
+func TestCLIExplainAndEffectiveStatusSmoke(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	insertCLITestTraffic(t, dbPath, 1, 1, "free@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 2, 1, "override@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 3, 1, "scope@example.com", 1000, 2000, 3000)
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	run := func(args ...string) string {
+		t.Helper()
+		out.Reset()
+		errOut.Reset()
+		fullArgs := append([]string{"--database", dbPath}, args...)
+		if code := app.Run(fullArgs); code != 0 {
+			t.Fatalf("%v exited %d, stderr=%q stdout=%q", args, code, errOut.String(), out.String())
+		}
+		return out.String()
+	}
+
+	run("enable-all", "--inbound-id", "1", "--factor", "2")
+	run("exclude", "--email", "free@example.com", "--inbound-id", "1")
+	run("override", "--email", "override@example.com", "--inbound-id", "1", "--factor", "1.2")
+
+	if output := run("explain", "--email", "free@example.com", "--inbound-id", "1"); !strings.Contains(output, "source: exclude") || !strings.Contains(output, "mutates traffic: no") || !strings.Contains(output, "exclude > override") {
+		t.Fatalf("expected excluded explain output, got %q", output)
+	}
+	if output := run("explain", "--email", "override@example.com", "--inbound-id", "1"); !strings.Contains(output, "source: override") || !strings.Contains(output, "effective factor: 1.2") {
+		t.Fatalf("expected override explain output, got %q", output)
+	}
+	if output := run("explain", "--email", "scope@example.com", "--inbound-id", "1"); !strings.Contains(output, "source: scope") || !strings.Contains(output, "effective factor: 2") {
+		t.Fatalf("expected scope explain output, got %q", output)
+	}
+	if output := run("status", "--effective"); !strings.Contains(output, "Effective Status") || !strings.Contains(output, "excluded clients: 1") || !strings.Contains(output, "overridden clients: 1") {
+		t.Fatalf("expected effective status output, got %q", output)
+	}
+	if output := run("status", "--clients", "--inbound-id", "1"); !strings.Contains(output, "email=free@example.com") || !strings.Contains(output, "source=exclude") || !strings.Contains(output, "source=override") || !strings.Contains(output, "source=scope") {
+		t.Fatalf("expected client effective output, got %q", output)
+	}
+}
+
+func TestCLIStatusClientsWithoutInboundIsLimited(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createCLITestSchema(t, dbPath)
+	for i := 1; i <= 55; i++ {
+		insertCLITestTraffic(t, dbPath, int64(i), 1, fmt.Sprintf("user-%02d@example.com", i), 100, 200, 300)
+	}
+
+	var out, errOut bytes.Buffer
+	app := New(&out, &errOut)
+	if code := app.Run([]string{"--database", dbPath, "status", "--clients"}); code != 0 {
+		t.Fatalf("status --clients exited %d, stderr=%q stdout=%q", code, errOut.String(), out.String())
+	}
+	output := out.String()
+	if !strings.Contains(output, "Hint") || !strings.Contains(output, "showing: 50") || strings.Contains(output, "user-55@example.com") {
+		t.Fatalf("expected limited client output with hint, got %q", output)
 	}
 }
 

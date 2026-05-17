@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/PdYrust/XuiFactor/internal/engine"
+	"github.com/PdYrust/XuiFactor/internal/policy"
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
@@ -94,6 +95,36 @@ func (o output) Override(policy store.OverridePolicy) {
 	)
 }
 
+func (o output) ClientDecision(item engine.ClientEffectiveDecision) {
+	fmt.Fprintf(o.w, "  email=%s  inbound=%d  traffic=%d  factor=%s  source=%s  state=%s\n",
+		item.Client.Email,
+		item.Client.InboundID,
+		item.Client.ID,
+		decisionFactor(item.Decision),
+		sourceLabel(item.Decision.SourceType),
+		decisionState(item.Decision),
+	)
+}
+
+func (o output) Match(match policy.Match) {
+	switch match.SourceType {
+	case policy.SourceExclude:
+		fmt.Fprintf(o.w, "  exclude  state=active\n")
+	case policy.SourceUserOverride:
+		fmt.Fprintf(o.w, "  override  factor=%s\n", engine.FormatFactor(match.FactorPPM))
+	case policy.SourceSingleRule:
+		fmt.Fprintf(o.w, "  single-user rule=%d  factor=%s\n", match.RuleID, engine.FormatFactor(match.FactorPPM))
+	case policy.SourceInboundScope:
+		fmt.Fprintf(o.w, "  scope  rule=%d  inbound=%d  factor=%s\n", match.RuleID, match.InboundID, engine.FormatFactor(match.FactorPPM))
+	case policy.SourceGlobalScope:
+		fmt.Fprintf(o.w, "  scope  rule=%d  scope=global  factor=%s\n", match.RuleID, engine.FormatFactor(match.FactorPPM))
+	case policy.SourceSnapshot:
+		fmt.Fprintf(o.w, "  scope  rule=%d  scope=snapshot  factor=%s\n", match.RuleID, engine.FormatFactor(match.FactorPPM))
+	default:
+		fmt.Fprintf(o.w, "  none\n")
+	}
+}
+
 func scopeLabel(scope *store.Scope) string {
 	if scope == nil {
 		return "-"
@@ -126,4 +157,51 @@ func yesNo(value bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+func decisionFactor(decision policy.Decision) string {
+	if decision.SourceType == policy.SourceNone || decision.SourceType == policy.SourceExclude || decision.FactorPPM == 0 {
+		return "none"
+	}
+	return engine.FormatFactor(decision.FactorPPM)
+}
+
+func decisionMutatesTraffic(decision policy.Decision) bool {
+	return decision.Target != nil && decision.FactorPPM > engine.FactorScale
+}
+
+func decisionState(decision policy.Decision) string {
+	if decision.SourceType == policy.SourceNone {
+		return "none"
+	}
+	return "active"
+}
+
+func sourceLabel(source policy.SourceType) string {
+	switch source {
+	case policy.SourceExclude:
+		return "exclude"
+	case policy.SourceUserOverride:
+		return "override"
+	case policy.SourceSingleRule:
+		return "single-user"
+	case policy.SourceInboundScope, policy.SourceGlobalScope, policy.SourceSnapshot:
+		return "scope"
+	default:
+		return "none"
+	}
+}
+
+func policyPrecedenceText() string {
+	return policy.PrecedenceDescription
+}
+
+func statusRuleMatchesInbound(rule store.Rule, inboundID *int64) bool {
+	if inboundID == nil || rule.Scope == nil {
+		return true
+	}
+	if rule.Scope.InboundID == nil {
+		return true
+	}
+	return *rule.Scope.InboundID == *inboundID
 }
