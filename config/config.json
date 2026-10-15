@@ -1,5 +1,7 @@
 {
+  "database_backend": "auto",
   "database_path": "/etc/x-ui/x-ui.db",
+  "database_dsn": "",
   "poll_interval": "5s",
   "busy_timeout": "5s",
   "backup_dir": "/var/backups/xui-factor",

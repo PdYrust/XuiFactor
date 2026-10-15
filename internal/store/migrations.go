@@ -4,78 +4,76 @@ var migrationTableStatements = []string{
 	`CREATE TABLE IF NOT EXISTS xui_factor_meta (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL,
-		updated_at INTEGER NOT NULL
+		updated_at BIGINT NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_rules (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		__ID_COLUMN__,
 		name TEXT,
-		inbound_id INTEGER,
+		inbound_id BIGINT,
 		email TEXT NOT NULL,
-		factor_ppm INTEGER NOT NULL,
+		factor_ppm BIGINT NOT NULL,
 		state TEXT NOT NULL,
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL,
-		activated_at INTEGER,
-		paused_at INTEGER,
-		disabled_at INTEGER
+		created_at BIGINT NOT NULL,
+		updated_at BIGINT NOT NULL,
+		activated_at BIGINT,
+		paused_at BIGINT,
+		disabled_at BIGINT
 	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_rule_clients (
-		rule_id INTEGER NOT NULL,
-		traffic_id INTEGER NOT NULL,
-		inbound_id INTEGER NOT NULL,
+		rule_id BIGINT NOT NULL,
+		traffic_id BIGINT NOT NULL,
+		inbound_id BIGINT NOT NULL,
 		email TEXT NOT NULL,
-		last_up INTEGER NOT NULL,
-		last_down INTEGER NOT NULL,
-		last_all_time INTEGER NOT NULL,
-		rem_up INTEGER NOT NULL DEFAULT 0,
-		rem_down INTEGER NOT NULL DEFAULT 0,
-		rem_all_time INTEGER NOT NULL DEFAULT 0,
-		missing_since INTEGER,
-		updated_at INTEGER NOT NULL,
+		last_up BIGINT NOT NULL,
+		last_down BIGINT NOT NULL,
+		rem_up BIGINT NOT NULL DEFAULT 0,
+		rem_down BIGINT NOT NULL DEFAULT 0,
+		missing_since BIGINT,
+		updated_at BIGINT NOT NULL,
 		PRIMARY KEY(rule_id, traffic_id)
 	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_scopes (
-		rule_id INTEGER PRIMARY KEY,
-		inbound_id INTEGER,
-		limited_only INTEGER NOT NULL DEFAULT 0,
-		include_disabled_clients INTEGER NOT NULL DEFAULT 0,
-		once INTEGER NOT NULL DEFAULT 0,
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL
+		rule_id BIGINT PRIMARY KEY,
+		inbound_id BIGINT,
+		limited_only BIGINT NOT NULL DEFAULT 0,
+		include_disabled_clients BIGINT NOT NULL DEFAULT 0,
+		once BIGINT NOT NULL DEFAULT 0,
+		created_at BIGINT NOT NULL,
+		updated_at BIGINT NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_excludes (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		traffic_id INTEGER NOT NULL,
-		inbound_id INTEGER NOT NULL,
+		__ID_COLUMN__,
+		traffic_id BIGINT NOT NULL,
+		inbound_id BIGINT NOT NULL,
 		email TEXT NOT NULL,
 		state TEXT NOT NULL,
 		note TEXT,
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL,
-		activated_at INTEGER,
-		disabled_at INTEGER,
+		created_at BIGINT NOT NULL,
+		updated_at BIGINT NOT NULL,
+		activated_at BIGINT,
+		disabled_at BIGINT,
 		UNIQUE(traffic_id, inbound_id, email)
 	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_overrides (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		traffic_id INTEGER NOT NULL,
-		inbound_id INTEGER NOT NULL,
+		__ID_COLUMN__,
+		traffic_id BIGINT NOT NULL,
+		inbound_id BIGINT NOT NULL,
 		email TEXT NOT NULL,
-		factor_ppm INTEGER NOT NULL,
+		factor_ppm BIGINT NOT NULL,
 		state TEXT NOT NULL,
 		note TEXT,
-		created_at INTEGER NOT NULL,
-		updated_at INTEGER NOT NULL,
-		activated_at INTEGER,
-		disabled_at INTEGER,
+		created_at BIGINT NOT NULL,
+		updated_at BIGINT NOT NULL,
+		activated_at BIGINT,
+		disabled_at BIGINT,
 		UNIQUE(traffic_id, inbound_id, email)
 	)`,
 	`CREATE TABLE IF NOT EXISTS xui_factor_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		rule_id INTEGER,
+		__ID_COLUMN__,
+		rule_id BIGINT,
 		event_type TEXT NOT NULL,
 		message TEXT,
-		created_at INTEGER NOT NULL
+		created_at BIGINT NOT NULL
 	)`,
 }
 
@@ -118,75 +116,109 @@ var migrationColumns = map[string][]migrationColumn{
 	"xui_factor_meta": {
 		{name: "key", ddl: "key TEXT"},
 		{name: "value", ddl: "value TEXT NOT NULL DEFAULT ''"},
-		{name: "updated_at", ddl: "updated_at INTEGER NOT NULL DEFAULT 0"},
+		{name: "updated_at", ddl: "updated_at BIGINT NOT NULL DEFAULT 0"},
 	},
 	"xui_factor_rules": {
 		{name: "name", ddl: "name TEXT"},
-		{name: "inbound_id", ddl: "inbound_id INTEGER"},
+		{name: "inbound_id", ddl: "inbound_id BIGINT"},
 		{name: "email", ddl: "email TEXT NOT NULL DEFAULT ''"},
-		{name: "factor_ppm", ddl: "factor_ppm INTEGER NOT NULL DEFAULT 1000000"},
+		{name: "factor_ppm", ddl: "factor_ppm BIGINT NOT NULL DEFAULT 1000000"},
 		{name: "state", ddl: "state TEXT NOT NULL DEFAULT 'active'"},
-		{name: "created_at", ddl: "created_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "updated_at", ddl: "updated_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "activated_at", ddl: "activated_at INTEGER"},
-		{name: "paused_at", ddl: "paused_at INTEGER"},
-		{name: "disabled_at", ddl: "disabled_at INTEGER"},
+		{name: "created_at", ddl: "created_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "updated_at", ddl: "updated_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "activated_at", ddl: "activated_at BIGINT"},
+		{name: "paused_at", ddl: "paused_at BIGINT"},
+		{name: "disabled_at", ddl: "disabled_at BIGINT"},
 	},
 	"xui_factor_rule_clients": {
-		{name: "rule_id", ddl: "rule_id INTEGER NOT NULL DEFAULT 0"},
-		{name: "traffic_id", ddl: "traffic_id INTEGER NOT NULL DEFAULT 0"},
-		{name: "inbound_id", ddl: "inbound_id INTEGER NOT NULL DEFAULT 0"},
+		{name: "rule_id", ddl: "rule_id BIGINT NOT NULL DEFAULT 0"},
+		{name: "traffic_id", ddl: "traffic_id BIGINT NOT NULL DEFAULT 0"},
+		{name: "inbound_id", ddl: "inbound_id BIGINT NOT NULL DEFAULT 0"},
 		{name: "email", ddl: "email TEXT NOT NULL DEFAULT ''"},
-		{name: "last_up", ddl: "last_up INTEGER NOT NULL DEFAULT 0"},
-		{name: "last_down", ddl: "last_down INTEGER NOT NULL DEFAULT 0"},
-		{name: "last_all_time", ddl: "last_all_time INTEGER NOT NULL DEFAULT 0"},
-		{name: "rem_up", ddl: "rem_up INTEGER NOT NULL DEFAULT 0"},
-		{name: "rem_down", ddl: "rem_down INTEGER NOT NULL DEFAULT 0"},
-		{name: "rem_all_time", ddl: "rem_all_time INTEGER NOT NULL DEFAULT 0"},
-		{name: "missing_since", ddl: "missing_since INTEGER"},
-		{name: "updated_at", ddl: "updated_at INTEGER NOT NULL DEFAULT 0"},
+		{name: "last_up", ddl: "last_up BIGINT NOT NULL DEFAULT 0"},
+		{name: "last_down", ddl: "last_down BIGINT NOT NULL DEFAULT 0"},
+		{name: "rem_up", ddl: "rem_up BIGINT NOT NULL DEFAULT 0"},
+		{name: "rem_down", ddl: "rem_down BIGINT NOT NULL DEFAULT 0"},
+		{name: "missing_since", ddl: "missing_since BIGINT"},
+		{name: "updated_at", ddl: "updated_at BIGINT NOT NULL DEFAULT 0"},
 	},
 	"xui_factor_scopes": {
-		{name: "rule_id", ddl: "rule_id INTEGER NOT NULL DEFAULT 0"},
-		{name: "inbound_id", ddl: "inbound_id INTEGER"},
-		{name: "limited_only", ddl: "limited_only INTEGER NOT NULL DEFAULT 0"},
-		{name: "include_disabled_clients", ddl: "include_disabled_clients INTEGER NOT NULL DEFAULT 0"},
-		{name: "once", ddl: "once INTEGER NOT NULL DEFAULT 0"},
-		{name: "created_at", ddl: "created_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "updated_at", ddl: "updated_at INTEGER NOT NULL DEFAULT 0"},
+		{name: "rule_id", ddl: "rule_id BIGINT NOT NULL DEFAULT 0"},
+		{name: "inbound_id", ddl: "inbound_id BIGINT"},
+		{name: "limited_only", ddl: "limited_only BIGINT NOT NULL DEFAULT 0"},
+		{name: "include_disabled_clients", ddl: "include_disabled_clients BIGINT NOT NULL DEFAULT 0"},
+		{name: "once", ddl: "once BIGINT NOT NULL DEFAULT 0"},
+		{name: "created_at", ddl: "created_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "updated_at", ddl: "updated_at BIGINT NOT NULL DEFAULT 0"},
 	},
 	"xui_factor_excludes": {
-		{name: "traffic_id", ddl: "traffic_id INTEGER NOT NULL DEFAULT 0"},
-		{name: "inbound_id", ddl: "inbound_id INTEGER NOT NULL DEFAULT 0"},
+		{name: "traffic_id", ddl: "traffic_id BIGINT NOT NULL DEFAULT 0"},
+		{name: "inbound_id", ddl: "inbound_id BIGINT NOT NULL DEFAULT 0"},
 		{name: "email", ddl: "email TEXT NOT NULL DEFAULT ''"},
 		{name: "state", ddl: "state TEXT NOT NULL DEFAULT 'active'"},
 		{name: "note", ddl: "note TEXT"},
-		{name: "created_at", ddl: "created_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "updated_at", ddl: "updated_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "activated_at", ddl: "activated_at INTEGER"},
-		{name: "disabled_at", ddl: "disabled_at INTEGER"},
+		{name: "created_at", ddl: "created_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "updated_at", ddl: "updated_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "activated_at", ddl: "activated_at BIGINT"},
+		{name: "disabled_at", ddl: "disabled_at BIGINT"},
 	},
 	"xui_factor_overrides": {
-		{name: "traffic_id", ddl: "traffic_id INTEGER NOT NULL DEFAULT 0"},
-		{name: "inbound_id", ddl: "inbound_id INTEGER NOT NULL DEFAULT 0"},
+		{name: "traffic_id", ddl: "traffic_id BIGINT NOT NULL DEFAULT 0"},
+		{name: "inbound_id", ddl: "inbound_id BIGINT NOT NULL DEFAULT 0"},
 		{name: "email", ddl: "email TEXT NOT NULL DEFAULT ''"},
-		{name: "factor_ppm", ddl: "factor_ppm INTEGER NOT NULL DEFAULT 1000000"},
+		{name: "factor_ppm", ddl: "factor_ppm BIGINT NOT NULL DEFAULT 1000000"},
 		{name: "state", ddl: "state TEXT NOT NULL DEFAULT 'active'"},
 		{name: "note", ddl: "note TEXT"},
-		{name: "created_at", ddl: "created_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "updated_at", ddl: "updated_at INTEGER NOT NULL DEFAULT 0"},
-		{name: "activated_at", ddl: "activated_at INTEGER"},
-		{name: "disabled_at", ddl: "disabled_at INTEGER"},
+		{name: "created_at", ddl: "created_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "updated_at", ddl: "updated_at BIGINT NOT NULL DEFAULT 0"},
+		{name: "activated_at", ddl: "activated_at BIGINT"},
+		{name: "disabled_at", ddl: "disabled_at BIGINT"},
 	},
 	"xui_factor_events": {
-		{name: "rule_id", ddl: "rule_id INTEGER"},
+		{name: "rule_id", ddl: "rule_id BIGINT"},
 		{name: "event_type", ddl: "event_type TEXT NOT NULL DEFAULT ''"},
 		{name: "message", ddl: "message TEXT"},
-		{name: "created_at", ddl: "created_at INTEGER NOT NULL DEFAULT 0"},
+		{name: "created_at", ddl: "created_at BIGINT NOT NULL DEFAULT 0"},
 	},
+}
+
+// migrationPolicyDedupeStatements normalize policy rows written before the
+// inbound pointer stopped being part of the client identity. A client could
+// accumulate one active exclude or override per inbound pointer; keep the
+// latest row per client and disable the rest so policy stays unambiguous.
+// Placeholders receive the migration timestamp.
+var migrationPolicyDedupeStatements = []string{
+	`UPDATE xui_factor_excludes
+		SET state = 'disabled', disabled_at = ?, updated_at = ?
+		WHERE state = 'active'
+			AND id NOT IN (
+				SELECT MAX(id)
+				FROM xui_factor_excludes
+				WHERE state = 'active'
+				GROUP BY traffic_id, email
+			)`,
+	`UPDATE xui_factor_overrides
+		SET state = 'disabled', disabled_at = ?, updated_at = ?
+		WHERE state = 'active'
+			AND id NOT IN (
+				SELECT MAX(id)
+				FROM xui_factor_overrides
+				WHERE state = 'active'
+				GROUP BY traffic_id, email
+			)`,
 }
 
 type migrationColumn struct {
 	name string
 	ddl  string
+}
+
+// migrationDropColumns removes metadata columns from earlier XuiFactor versions
+// that are no longer part of the schema. 3x-ui 3.x dropped the all_time counter
+// they were derived from, so the stored all-time baselines are dead weight.
+var migrationDropColumns = []struct {
+	table   string
+	columns []string
+}{
+	{table: "xui_factor_rule_clients", columns: []string{"last_all_time", "rem_all_time"}},
 }

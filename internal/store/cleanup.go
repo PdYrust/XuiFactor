@@ -55,14 +55,14 @@ func (s *Store) AutoCleanup(ctx context.Context, opts CleanupOptions) (CleanupRe
 }
 
 func (s *Store) Vacuum(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, "VACUUM")
-	return wrapSQLiteError("vacuum sqlite database", err)
+	_, err := s.execContext(ctx, "VACUUM")
+	return wrapDatabaseError("vacuum database", err)
 }
 
 func (tx *Tx) GetMetaInt64(ctx context.Context, key string) (int64, bool, error) {
 	var value int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT CAST(value AS INTEGER)
+		SELECT CAST(value AS BIGINT)
 		FROM xui_factor_meta
 		WHERE key = ?
 	`, key).Scan(&value)
@@ -174,7 +174,7 @@ func (tx *Tx) markMismatchedRuleClients(ctx context.Context, now int64, dryRun b
 		if err != nil && !missing {
 			return 0, err
 		}
-		mismatched := !missing && (current.InboundID != client.InboundID || current.Email != client.Email)
+		mismatched := !missing && current.Email != client.Email
 		if !missing && !mismatched {
 			continue
 		}

@@ -147,14 +147,13 @@ func (s *Service) enableAllSnapshot(ctx context.Context, tx *store.Tx, req Enabl
 
 	for _, target := range targets {
 		if err := tx.CreateRuleClient(ctx, store.RuleClient{
-			RuleID:      ruleID,
-			TrafficID:   target.client.ID,
-			InboundID:   target.client.InboundID,
-			Email:       target.client.Email,
-			LastUp:      target.client.Up,
-			LastDown:    target.client.Down,
-			LastAllTime: target.client.AllTime,
-			UpdatedAt:   now,
+			RuleID:    ruleID,
+			TrafficID: target.client.ID,
+			InboundID: target.client.InboundID,
+			Email:     target.client.Email,
+			LastUp:    target.client.Up,
+			LastDown:  target.client.Down,
+			UpdatedAt: now,
 		}); err != nil {
 			return err
 		}
@@ -232,14 +231,13 @@ func (s *Service) enableAllPersistent(ctx context.Context, tx *store.Tx, req Ena
 		}
 		if len(rules) == 0 {
 			if err := tx.CreateRuleClient(ctx, store.RuleClient{
-				RuleID:      scope.RuleID,
-				TrafficID:   client.ID,
-				InboundID:   client.InboundID,
-				Email:       client.Email,
-				LastUp:      client.Up,
-				LastDown:    client.Down,
-				LastAllTime: client.AllTime,
-				UpdatedAt:   now,
+				RuleID:    scope.RuleID,
+				TrafficID: client.ID,
+				InboundID: client.InboundID,
+				Email:     client.Email,
+				LastUp:    client.Up,
+				LastDown:  client.Down,
+				UpdatedAt: now,
 			}); err != nil {
 				return err
 			}
@@ -290,9 +288,6 @@ func adoptSingleRuleIntoScope(ctx context.Context, tx *store.Tx, scope store.Sco
 	if rule.FactorPPM != scope.Rule.FactorPPM {
 		return false, "factor does not match scope", nil
 	}
-	if scope.InboundID != nil && rule.InboundID != *scope.InboundID {
-		return false, "inbound does not match scope", nil
-	}
 	if scope.LimitedOnly && client.Total <= 0 {
 		return false, "client is not limited", nil
 	}
@@ -313,7 +308,7 @@ func adoptSingleRuleIntoScope(ctx context.Context, tx *store.Tx, scope store.Sco
 	if err != nil {
 		return false, "", err
 	}
-	if rc.MissingAt != nil || rc.InboundID != client.InboundID || rc.Email != client.Email {
+	if rc.MissingAt != nil || rc.Email != client.Email {
 		if err := tx.MarkRuleClientMissing(ctx, rule.ID, rc.TrafficID, now); err != nil {
 			return false, "", err
 		}

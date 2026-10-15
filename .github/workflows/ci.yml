@@ -12,6 +12,24 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: xui
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: xui_factor_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_POSTGRES_DSN: postgres://xui:secret@127.0.0.1:5432/xui_factor_test?sslmode=disable
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

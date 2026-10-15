@@ -78,10 +78,16 @@ func (s *Service) Enable(ctx context.Context, req EnableRequest) (store.Rule, er
 			return err
 		}
 
+		// Single-user rules keep the inbound the operator asked for; without an
+		// explicit inbound the live client pointer is recorded.
+		ruleInboundID := client.InboundID
+		if req.InboundID != nil {
+			ruleInboundID = *req.InboundID
+		}
 		ruleID, err := tx.CreateRule(ctx, store.Rule{
 			Name:        strings.TrimSpace(req.Name),
-			InboundID:   client.InboundID,
-			Email:       client.Email,
+			InboundID:   ruleInboundID,
+			Email:       email,
 			FactorPPM:   factorPPM,
 			State:       store.StateActive,
 			CreatedAt:   now,
@@ -93,14 +99,13 @@ func (s *Service) Enable(ctx context.Context, req EnableRequest) (store.Rule, er
 		}
 
 		if err := tx.CreateRuleClient(ctx, store.RuleClient{
-			RuleID:      ruleID,
-			TrafficID:   client.ID,
-			InboundID:   client.InboundID,
-			Email:       client.Email,
-			LastUp:      client.Up,
-			LastDown:    client.Down,
-			LastAllTime: client.AllTime,
-			UpdatedAt:   now,
+			RuleID:    ruleID,
+			TrafficID: client.ID,
+			InboundID: client.InboundID,
+			Email:     client.Email,
+			LastUp:    client.Up,
+			LastDown:  client.Down,
+			UpdatedAt: now,
 		}); err != nil {
 			return err
 		}

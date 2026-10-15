@@ -2,9 +2,13 @@
 
 ## 1. Overview
 
-XuiFactor is a Linux sidecar for 3x-ui servers. It applies temporary traffic factor rules to 3x-ui client counters stored in SQLite without modifying 3x-ui source code.
+XuiFactor is a Linux sidecar for 3x-ui 3.x servers. It applies temporary traffic factor rules to 3x-ui client counters without modifying 3x-ui source code. Panels running on either the SQLite database file or PostgreSQL are supported.
 
-Rule metadata is stored in the same SQLite database using `xui_factor_*` metadata tables. Factored traffic remains in the 3x-ui counters after a rule is disabled, and future traffic after disabling is counted normally.
+Rule metadata is stored in the panel database using `xui_factor_*` metadata tables. Factored traffic remains in the 3x-ui counters after a rule is disabled, and future traffic after disabling is counted normally.
+
+On 3.x a client is identified by email and can be attached to several inbounds. XuiFactor resolves inbound membership through the authoritative `clients` and `client_inbounds` tables; the `client_traffics.inbound_id` pointer is treated as informational and may go stale.
+
+Upgrade 3x-ui first, let the panel finish its boot migration, and only then upgrade XuiFactor. Legacy databases that still contain `client_traffics.all_time` are rejected with an upgrade hint.
 
 Repository: https://github.com/PdYrust/XuiFactor
 
@@ -13,8 +17,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.4.0_linux_amd64.tar.gz
-cd xui-factor_v0.4.0_linux_amd64
+tar -xzf xui-factor_v0.5.0-beta_linux_amd64.tar.gz
+cd xui-factor_v0.5.0-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -33,7 +37,7 @@ sudo ./scripts/install.sh
 
 After installation, the command should be available as `xui-factor`.
 
-## 4. Default paths
+## 4. Default paths and database backends
 
 ```text
 config: /etc/xui-factor/config.json
@@ -43,6 +47,22 @@ service: xui-factor.service
 ```
 
 The default config points at the standard 3x-ui SQLite database path. Use `--config PATH` to run commands with a different config file.
+
+Database backends are selected with `database_backend` and `database_dsn`:
+
+```json
+{
+  "database_backend": "auto",
+  "database_path": "/etc/x-ui/x-ui.db",
+  "database_dsn": ""
+}
+```
+
+- `auto` (default): a configured DSN selects PostgreSQL, otherwise SQLite.
+- `sqlite`: use `database_path`.
+- `postgres`: use `database_dsn`, for example `postgres://x-ui:password@127.0.0.1:5432/x-ui?sslmode=disable`.
+
+When the config file leaves the backend on `auto`, XuiFactor reads `XUI_DB_TYPE` and `XUI_DB_DSN` from its environment and from the panel service environment file directly (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`, depending on the distro — the packaged systemd unit imports all three layouts). A panel running PostgreSQL is therefore detected without extra configuration for both the daemon and one-off commands. Process environment variables win over the file, and explicit config file values win over both.
 
 Cleanup defaults:
 
@@ -61,7 +81,7 @@ Run doctor before applying rules:
 xui-factor doctor
 ```
 
-Doctor checks config loading, database access, required 3x-ui schema, XuiFactor metadata readiness, backup directory access, rule counts, and service state where available.
+Doctor checks config loading, the active database backend and connection, database access and write access, required 3x-ui 3.x schema, XuiFactor metadata readiness, backup directory access, rule counts, and service state where available.
 
 ## 6. Backups
 
@@ -71,7 +91,7 @@ Create a backup before broad changes:
 xui-factor backup
 ```
 
-Backups are SQLite-consistent and are written to the configured backup directory. The command prints the final backup path.
+Backups are written to the configured backup directory and the command prints the final backup path. On SQLite the backup is a consistent `.db` file. On PostgreSQL the backup is a `.dump` file created with `pg_dump`; install the PostgreSQL client tools on the host for this command.
 
 ## 7. Single-user factor rules
 
@@ -83,7 +103,7 @@ xui-factor enable --email User --inbound-id 1 --factor 1.2
 
 `factor 1.2` means new traffic is counted as 120%. `factor 5` means new traffic is counted as 500%. `factor 1` applies no extra traffic and only refreshes baseline behavior during ticks.
 
-Use `--inbound-id` when the same email may exist on more than one inbound.
+Use `--inbound-id` to scope a command to one inbound. On 3.x emails are unique; the flag resolves the client's membership through `clients` and `client_inbounds` and fails when the client is not attached to that inbound.
 
 ## 8. Bulk factor rules
 
@@ -145,7 +165,7 @@ Disable an exclude:
 xui-factor unexclude --email User --inbound-id 1
 ```
 
-An exclude is tied to the current traffic id, inbound id, and email. It stops future factor updates for that client but does not subtract previously factored traffic. After `unexclude`, matching rules and scopes can factor future traffic from the current counters; traffic that arrived while excluded is not retroactively factored.
+An exclude is tied to the client (traffic id and email). It stops future factor updates for that client but does not subtract previously factored traffic. The stored inbound is informational and follows the client when it moves between inbounds. After `unexclude`, matching rules and scopes can factor future traffic from the current counters; traffic that arrived while excluded is not retroactively factored.
 
 ## 11. Override policies
 
@@ -167,7 +187,7 @@ Remove an override:
 xui-factor remove-override --email User --inbound-id 1
 ```
 
-An override is tied to the current traffic id, inbound id, and email. It replaces the broader matched factor for that client and does not stack with a scope factor. Exclude policies still win over overrides. Previously factored traffic remains unchanged, and removing an override does not retroactively change traffic that arrived while the override was active.
+An override is tied to the client (traffic id and email). It replaces the broader matched factor for that client and does not stack with a scope factor. Exclude policies still win over overrides. The stored inbound is informational and follows the client when it moves between inbounds. Previously factored traffic remains unchanged, and removing an override does not retroactively change traffic that arrived while the override was active.
 
 ## 12. Explain and effective status
 
@@ -330,9 +350,13 @@ xui-factor reconcile
 
 Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible legacy rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned legacy rules are inactive and are pruned later by cleanup retention.
 
+When the panel replaces the email-keyed traffic row (for example during a 3.x upgrade merge or a client rename), reconcile follows the email to the current row and re-links the rule (`client_relinked` audit event) instead of orphaning it. Active excludes and overrides move onto the current row too, counted as `policies repaired`; a duplicate row that already targets the current traffic row retires the stale one. Missing rule clients whose row has returned are revived with a refreshed baseline.
+
+Re-issuing `exclude` or `override` for a client whose stored row was replaced moves the existing row onto the current traffic row instead of creating a duplicate, and `unexclude` and `remove-override` still find the moved row.
+
 ## 19. Metadata cleanup
 
-The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id, inbound id, and email. Missing client tracking is pruned after the grace period.
+The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id and email. Missing client tracking is pruned after the grace period.
 
 Run a dry run before manual cleanup on production servers:
 
@@ -352,11 +376,13 @@ Override disabled-rule and audit retention for one run:
 xui-factor cleanup --older-than 24h
 ```
 
-Cleanup prunes only XuiFactor metadata, including inactive excludes and overrides after retention. It never modifies 3x-ui counters and does not subtract previously factored traffic. SQLite `VACUUM` is explicit only:
+Cleanup prunes only XuiFactor metadata, including inactive excludes and overrides after retention. It never modifies 3x-ui counters and does not subtract previously factored traffic. `VACUUM` is explicit only:
 
 ```sh
 xui-factor cleanup --vacuum
 ```
+
+On SQLite this compacts the database file; on PostgreSQL it runs standard `VACUUM` maintenance.
 
 ## 20. Update workflow
 
@@ -367,6 +393,14 @@ sudo ./scripts/update.sh
 ```
 
 The update workflow preserves existing config, refreshes installed package files, enables `xui-factor.service`, and restarts it by default. Use `--no-start` or `--no-restart` to skip restart, and `--no-enable` to avoid enabling service startup.
+
+When upgrading from an older 3x-ui version, upgrade the panel first. Stop `xui-factor.service`, upgrade 3x-ui, let it boot once so its database migration completes, install the new XuiFactor package, and then run:
+
+```sh
+xui-factor doctor
+xui-factor reconcile --dry-run
+xui-factor reconcile
+```
 
 ## 21. Uninstall workflow
 
@@ -390,7 +424,7 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 
 1. Stop `xui-factor.service`.
 2. Stop 3x-ui.
-3. Restore the selected backup database manually.
+3. Restore the selected backup manually: replace the SQLite database file, or run `pg_restore --clean --if-exists --dbname "$XUI_DB_DSN" x-ui-<timestamp>.dump` on PostgreSQL.
 4. Start 3x-ui.
 5. Start `xui-factor.service`.
 6. Run `xui-factor doctor`.
@@ -400,6 +434,7 @@ Keep backup files until the recovered server has been verified.
 
 ## 23. Safety checklist
 
+- Upgrade 3x-ui to 3.x and let the panel boot once before upgrading XuiFactor.
 - Run `xui-factor doctor` first.
 - Run `xui-factor backup` before broad changes.
 - Test a single user before `enable-all`.

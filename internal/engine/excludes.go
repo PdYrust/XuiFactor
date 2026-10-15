@@ -77,7 +77,11 @@ func (s *Service) Unexclude(ctx context.Context, selector ExcludeSelector) (stor
 		if err != nil {
 			return describeSelectorError("find client", err)
 		}
-		policy, err = tx.FindActiveExcludeForClient(ctx, client.ID, client.InboundID, client.Email)
+		policy, err = tx.FindActiveExcludeForClient(ctx, client.ID, client.Email)
+		if errors.Is(err, store.ErrNotFound) {
+			// The stored row may still point at a replaced traffic row.
+			policy, err = tx.FindActiveExcludeByEmail(ctx, client.Email)
+		}
 		if err != nil {
 			return describeSelectorError("find exclude policy", err)
 		}
@@ -88,7 +92,7 @@ func (s *Service) Unexclude(ctx context.Context, selector ExcludeSelector) (stor
 		if err := tx.AddEvent(ctx, nil, store.EventExcludeDisable, message, now); err != nil {
 			return err
 		}
-		policy, err = tx.FindExcludeByIdentity(ctx, client.ID, client.InboundID, client.Email)
+		policy, err = tx.FindExcludeByID(ctx, policy.ID)
 		return err
 	})
 	return policy, err

@@ -46,8 +46,8 @@ func TestMigrateUpgradesOldSingleUserMetadataIdempotently(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	execTestSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(1, 7, 1, 'old@example.com', 10, 20, 30, 0, 0, 0, 0)
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+		VALUES(1, 7, 1, 'old@example.com', 10, 20, 0, 0, 0, 0)
 	`)
 	execTestSQL(t, db, `
 		CREATE TABLE xui_factor_rules (
@@ -93,12 +93,17 @@ func TestMigrateUpgradesOldSingleUserMetadataIdempotently(t *testing.T) {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
-	for _, column := range []string{"inbound_id", "email", "rem_up", "rem_down", "rem_all_time", "missing_since", "updated_at"} {
+	for _, column := range []string{"inbound_id", "email", "rem_up", "rem_down", "missing_since", "updated_at"} {
 		if !testColumnExists(t, st.db, "xui_factor_rule_clients", column) {
 			t.Fatalf("xui_factor_rule_clients.%s missing after migration", column)
 		}
 	}
-	var inboundID, up, down, allTime, ruleClients, metaRows int64
+	for _, column := range []string{"last_all_time", "rem_all_time"} {
+		if testColumnExists(t, st.db, "xui_factor_rule_clients", column) {
+			t.Fatalf("xui_factor_rule_clients.%s still present after migration", column)
+		}
+	}
+	var inboundID, up, down, ruleClients int64
 	var email string
 	err = st.db.QueryRowContext(ctx, `
 		SELECT inbound_id, email
@@ -111,11 +116,11 @@ func TestMigrateUpgradesOldSingleUserMetadataIdempotently(t *testing.T) {
 	if inboundID != 7 || email != "old@example.com" {
 		t.Fatalf("identity = inbound=%d email=%q, want inbound=7 email=old@example.com", inboundID, email)
 	}
-	if err := st.db.QueryRowContext(ctx, `SELECT up, down, all_time FROM client_traffics WHERE id=1`).Scan(&up, &down, &allTime); err != nil {
+	if err := st.db.QueryRowContext(ctx, `SELECT up, down FROM client_traffics WHERE id=1`).Scan(&up, &down); err != nil {
 		t.Fatalf("read counters: %v", err)
 	}
-	if up != 10 || down != 20 || allTime != 30 {
-		t.Fatalf("migration changed counters: up=%d down=%d all_time=%d", up, down, allTime)
+	if up != 10 || down != 20 {
+		t.Fatalf("migration changed counters: up=%d down=%d", up, down)
 	}
 	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM xui_factor_rule_clients`).Scan(&ruleClients); err != nil {
 		t.Fatalf("count rule clients: %v", err)
@@ -123,11 +128,12 @@ func TestMigrateUpgradesOldSingleUserMetadataIdempotently(t *testing.T) {
 	if ruleClients != 1 {
 		t.Fatalf("rule clients = %d, want 1", ruleClients)
 	}
-	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM xui_factor_meta WHERE key='schema_version'`).Scan(&metaRows); err != nil {
-		t.Fatalf("count schema version rows: %v", err)
+	var schemaVersion string
+	if err := st.db.QueryRowContext(ctx, `SELECT value FROM xui_factor_meta WHERE key='schema_version'`).Scan(&schemaVersion); err != nil {
+		t.Fatalf("read schema version: %v", err)
 	}
-	if metaRows != 1 {
-		t.Fatalf("schema version rows = %d, want 1", metaRows)
+	if schemaVersion != "3" {
+		t.Fatalf("schema version = %q, want 3", schemaVersion)
 	}
 }
 
@@ -140,8 +146,8 @@ func TestMigrateUpgradesPolicyScopeAndAuditMetadata(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	execTestSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(1, 1, 1, 'policy@example.com', 100, 200, 300, 0, 0, 0, 0)
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+		VALUES(1, 1, 1, 'policy@example.com', 100, 200, 0, 0, 0, 0)
 	`)
 	execTestSQL(t, db, `
 		CREATE TABLE xui_factor_rules (
@@ -254,6 +260,11 @@ func TestMigrateUpgradesPolicyScopeAndAuditMetadata(t *testing.T) {
 			}
 		}
 	}
+	for _, column := range []string{"last_all_time", "rem_all_time"} {
+		if testColumnExists(t, st.db, "xui_factor_rule_clients", column) {
+			t.Fatalf("xui_factor_rule_clients.%s still present after migration", column)
+		}
+	}
 	if _, err := st.ListExcludes(ctx, false, nil); err != nil {
 		t.Fatalf("list excludes after migration: %v", err)
 	}
@@ -277,6 +288,14 @@ func TestValidateSchemaRejectsMissingColumn(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	execTestSQL(t, db, `CREATE TABLE inbounds (id INTEGER PRIMARY KEY)`)
+	execTestSQL(t, db, `CREATE TABLE clients (
+		id INTEGER PRIMARY KEY,
+		email TEXT
+	)`)
+	execTestSQL(t, db, `CREATE TABLE client_inbounds (
+		client_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL
+	)`)
 	execTestSQL(t, db, `
 		CREATE TABLE client_traffics (
 			id INTEGER,
@@ -286,7 +305,6 @@ func TestValidateSchemaRejectsMissingColumn(t *testing.T) {
 			up INTEGER,
 			down INTEGER,
 			expiry_time INTEGER,
-			total INTEGER,
 			reset INTEGER,
 			last_online INTEGER
 		)
@@ -301,8 +319,97 @@ func TestValidateSchemaRejectsMissingColumn(t *testing.T) {
 	}
 	defer st.Close()
 
-	if err := st.ValidateRequiredSchema(ctx); !errors.Is(err, ErrSchema) {
+	err = st.ValidateRequiredSchema(ctx)
+	if !errors.Is(err, ErrSchema) {
 		t.Fatalf("expected ErrSchema, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "client_traffics.total") {
+		t.Fatalf("expected missing total column error, got %v", err)
+	}
+}
+
+func TestValidateSchemaRejectsLegacyAllTimeSchema(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createTestSchema(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	execTestSQL(t, db, `ALTER TABLE client_traffics ADD COLUMN all_time INTEGER`)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite: %v", err)
+	}
+
+	st, err := Open(ctx, dbPath, time.Second)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	err = st.ValidateRequiredSchema(ctx)
+	if !errors.Is(err, ErrSchema) {
+		t.Fatalf("expected ErrSchema, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "all_time") || !strings.Contains(err.Error(), "upgrade 3x-ui") {
+		t.Fatalf("expected legacy schema upgrade hint, got %v", err)
+	}
+}
+
+func TestMigrateDedupesLegacyActivePoliciesByIdentity(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createTestSchema(t, dbPath)
+
+	st, err := Open(ctx, dbPath, time.Second)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	execTestSQL(t, db, `
+		INSERT INTO xui_factor_excludes(traffic_id, inbound_id, email, state, created_at, updated_at, activated_at)
+		VALUES(1, 10, 'policy@example.com', 'active', 100, 100, 100),
+		      (1, 11, 'policy@example.com', 'active', 200, 200, 200)
+	`)
+	execTestSQL(t, db, `
+		INSERT INTO xui_factor_overrides(traffic_id, inbound_id, email, factor_ppm, state, created_at, updated_at, activated_at)
+		VALUES(1, 10, 'policy@example.com', 1200000, 'active', 100, 100, 100),
+		      (1, 11, 'policy@example.com', 1500000, 'active', 200, 200, 200)
+	`)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite: %v", err)
+	}
+
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+
+	for _, table := range []string{"xui_factor_excludes", "xui_factor_overrides"} {
+		var active, total int
+		if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE state = 'active'").Scan(&active); err != nil {
+			t.Fatalf("count active %s: %v", table, err)
+		}
+		if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&total); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if active != 1 || total != 2 {
+			t.Fatalf("%s rows = total %d active %d, want total 2 active 1", table, total, active)
+		}
+		var inboundID int64
+		if err := st.db.QueryRowContext(ctx, "SELECT inbound_id FROM "+table+" WHERE state = 'active'").Scan(&inboundID); err != nil {
+			t.Fatalf("read active %s: %v", table, err)
+		}
+		if inboundID != 11 {
+			t.Fatalf("active %s inbound = %d, want newest row (11)", table, inboundID)
+		}
 	}
 }
 
@@ -397,8 +504,8 @@ func TestBackupDoesNotOverwriteExistingPathAndIsUsable(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	execTestSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(1, 1, 1, 'backup@example.com', 10, 20, 30, 0, 0, 0, 0)
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+		VALUES(1, 1, 1, 'backup@example.com', 10, 20, 0, 0, 0, 0)
 	`)
 	if err := db.Close(); err != nil {
 		t.Fatalf("close sqlite: %v", err)
@@ -460,6 +567,14 @@ func createTestSchema(t *testing.T, dbPath string) {
 	defer db.Close()
 
 	execTestSQL(t, db, `CREATE TABLE inbounds (id INTEGER PRIMARY KEY)`)
+	execTestSQL(t, db, `CREATE TABLE clients (
+		id INTEGER PRIMARY KEY,
+		email TEXT
+	)`)
+	execTestSQL(t, db, `CREATE TABLE client_inbounds (
+		client_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL
+	)`)
 	execTestSQL(t, db, `
 		CREATE TABLE client_traffics (
 			id INTEGER,
@@ -468,7 +583,6 @@ func createTestSchema(t *testing.T, dbPath string) {
 			email TEXT,
 			up INTEGER,
 			down INTEGER,
-			all_time INTEGER,
 			expiry_time INTEGER,
 			total INTEGER,
 			reset INTEGER,

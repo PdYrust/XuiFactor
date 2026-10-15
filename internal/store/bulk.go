@@ -7,18 +7,18 @@ import (
 
 func (tx *Tx) ListClientCandidates(ctx context.Context, filter ClientFilter) ([]ClientTraffic, error) {
 	query := `
-		SELECT id, inbound_id, enable, email, up, down, all_time, total
+		SELECT id, inbound_id, ` + enableAsIntExpr(tx.driver) + `, email, up, down, total
 		FROM client_traffics
 		WHERE email <> ''`
 	args := make([]any, 0, 3)
 	if !filter.IncludeDisabledClients {
-		query += " AND enable = 1"
+		query += " AND " + enableTrueExpr(tx.driver, "")
 	}
 	if filter.LimitedOnly {
 		query += " AND total > 0"
 	}
 	if filter.InboundID != nil {
-		query += " AND inbound_id = ?"
+		query += " AND " + clientInboundMembership("client_traffics.email")
 		args = append(args, *filter.InboundID)
 	}
 	query += " ORDER BY inbound_id, email, id"
@@ -32,7 +32,7 @@ func (tx *Tx) ListClientCandidates(ctx context.Context, filter ClientFilter) ([]
 	var clients []ClientTraffic
 	for rows.Next() {
 		var c ClientTraffic
-		if err := rows.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.AllTime, &c.Total); err != nil {
+		if err := rows.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.Total); err != nil {
 			return nil, err
 		}
 		clients = append(clients, c)
@@ -82,11 +82,10 @@ func (tx *Tx) RulesForTrafficInStates(ctx context.Context, trafficID int64, stat
 
 func (tx *Tx) RefreshRuleClientBaselinesCount(ctx context.Context, ruleID, now int64) (int, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT rc.traffic_id, ct.inbound_id, ct.email, ct.up, ct.down, ct.all_time
+		SELECT rc.traffic_id, ct.inbound_id, ct.email, ct.up, ct.down
 		FROM xui_factor_rule_clients rc
 		INNER JOIN client_traffics ct
 			ON ct.id = rc.traffic_id
-			AND ct.inbound_id = rc.inbound_id
 			AND ct.email = rc.email
 		WHERE rc.rule_id = ?
 	`, ruleID)
@@ -97,7 +96,7 @@ func (tx *Tx) RefreshRuleClientBaselinesCount(ctx context.Context, ruleID, now i
 	var clients []ClientTraffic
 	for rows.Next() {
 		var c ClientTraffic
-		if err := rows.Scan(&c.ID, &c.InboundID, &c.Email, &c.Up, &c.Down, &c.AllTime); err != nil {
+		if err := rows.Scan(&c.ID, &c.InboundID, &c.Email, &c.Up, &c.Down); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -114,10 +113,10 @@ func (tx *Tx) RefreshRuleClientBaselinesCount(ctx context.Context, ruleID, now i
 	for _, c := range clients {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE xui_factor_rule_clients
-			SET inbound_id=?, email=?, last_up=?, last_down=?, last_all_time=?,
-				rem_up=0, rem_down=0, rem_all_time=0, missing_since=NULL, updated_at=?
+			SET inbound_id=?, email=?, last_up=?, last_down=?,
+				rem_up=0, rem_down=0, missing_since=NULL, updated_at=?
 			WHERE rule_id=? AND traffic_id=?
-		`, c.InboundID, c.Email, c.Up, c.Down, c.AllTime, now, ruleID, c.ID); err != nil {
+		`, c.InboundID, c.Email, c.Up, c.Down, now, ruleID, c.ID); err != nil {
 			return 0, err
 		}
 	}

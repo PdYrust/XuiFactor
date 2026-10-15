@@ -123,8 +123,8 @@ func TestEnableAllSkipsExistingActiveAndPausedRules(t *testing.T) {
 func TestDisableAllDisablesActiveAndPausedWithoutChangingCounters(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
-		{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 10, down: 20, allTime: 30},
-		{id: 2, inboundID: 1, enable: 1, email: "b@example.com", up: 40, down: 50, allTime: 90},
+		{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 10, down: 20},
+		{id: 2, inboundID: 1, enable: 1, email: "b@example.com", up: 40, down: 50},
 	})
 	defer st.Close()
 
@@ -134,8 +134,8 @@ func TestDisableAllDisablesActiveAndPausedWithoutChangingCounters(t *testing.T) 
 	if _, err := svc.PauseAll(ctx, BulkSelector{}); err != nil {
 		t.Fatalf("pause all: %v", err)
 	}
-	setBulkCounters(t, dbPath, 1, 100, 200, 300)
-	setBulkCounters(t, dbPath, 2, 400, 500, 900)
+	setBulkCounters(t, dbPath, 1, 100, 200)
+	setBulkCounters(t, dbPath, 2, 400, 500)
 
 	result, err := svc.DisableAll(ctx, BulkSelector{})
 	if err != nil {
@@ -147,8 +147,8 @@ func TestDisableAllDisablesActiveAndPausedWithoutChangingCounters(t *testing.T) 
 	if got := countBulkRules(t, dbPath, store.StateDisabled); got != 1 {
 		t.Fatalf("disabled rules = %d, want 1", got)
 	}
-	assertBulkCounters(t, dbPath, 1, 100, 200, 300)
-	assertBulkCounters(t, dbPath, 2, 400, 500, 900)
+	assertBulkCounters(t, dbPath, 1, 100, 200)
+	assertBulkCounters(t, dbPath, 2, 400, 500)
 }
 
 func TestPauseAllPausesOnlyActiveRules(t *testing.T) {
@@ -179,7 +179,7 @@ func TestPauseAllPausesOnlyActiveRules(t *testing.T) {
 func TestResumeAllRefreshesBaselines(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
-		{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 10, down: 20, allTime: 30},
+		{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 10, down: 20},
 	})
 	defer st.Close()
 
@@ -189,8 +189,8 @@ func TestResumeAllRefreshesBaselines(t *testing.T) {
 	if _, err := svc.PauseAll(ctx, BulkSelector{}); err != nil {
 		t.Fatalf("pause all: %v", err)
 	}
-	setBulkCounters(t, dbPath, 1, 100, 200, 300)
-	setBulkRuleClientState(t, dbPath, 1, 7, 8, 9, 12345)
+	setBulkCounters(t, dbPath, 1, 100, 200)
+	setBulkRuleClientState(t, dbPath, 1, 7, 8, 12345)
 
 	result, err := svc.ResumeAll(ctx, BulkSelector{})
 	if err != nil {
@@ -202,7 +202,7 @@ func TestResumeAllRefreshesBaselines(t *testing.T) {
 	if got := countBulkRules(t, dbPath, store.StateActive); got != 1 {
 		t.Fatalf("active rules = %d, want 1", got)
 	}
-	assertBulkRuleClientBaseline(t, dbPath, 1, 100, 200, 300)
+	assertBulkRuleClientBaseline(t, dbPath, 1, 100, 200)
 }
 
 func TestEnableAllExcludesDisabledClientsByDefault(t *testing.T) {
@@ -297,8 +297,8 @@ func TestEnableAllConsolidatesIntoExistingPersistentInboundScope(t *testing.T) {
 		t.Fatalf("create scope: %v", err)
 	}
 	scopeRuleID := firstScopeRuleID(t, dbPath)
-	insertBulkTraffic(t, dbPath, bulkTraffic{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 100, down: 200, allTime: 300})
-	insertBulkTraffic(t, dbPath, bulkTraffic{id: 2, inboundID: 1, enable: 1, email: "b@example.com", up: 400, down: 500, allTime: 900})
+	insertBulkTraffic(t, dbPath, bulkTraffic{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 100, down: 200})
+	insertBulkTraffic(t, dbPath, bulkTraffic{id: 2, inboundID: 1, enable: 1, email: "b@example.com", up: 400, down: 500})
 	if _, err := svc.Enable(ctx, EnableRequest{Email: "a@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
 		t.Fatalf("enable a: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestConsolidationPreservesBaselinesAndRemainders(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
-		{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -372,7 +372,7 @@ func TestConsolidationPreservesBaselinesAndRemainders(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 	singleRuleID := firstActiveSingleRuleID(t, dbPath)
-	setRuleClientDetailed(t, dbPath, singleRuleID, 1, 111, 222, 333, 7, 8, 9)
+	setRuleClientDetailed(t, dbPath, singleRuleID, 1, 111, 222, 7, 8)
 
 	result, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID})
 	if err != nil {
@@ -382,8 +382,8 @@ func TestConsolidationPreservesBaselinesAndRemainders(t *testing.T) {
 		t.Fatalf("adopted = %d, want 1", result.Adopted)
 	}
 	scopeRuleID := firstScopeRuleID(t, dbPath)
-	assertRuleClientDetailed(t, dbPath, scopeRuleID, 1, 111, 222, 333, 7, 8, 9)
-	assertBulkCounters(t, dbPath, 1, 100, 200, 300)
+	assertRuleClientDetailed(t, dbPath, scopeRuleID, 1, 111, 222, 7, 8)
+	assertBulkCounters(t, dbPath, 1, 100, 200)
 }
 
 func TestConsolidationDoesNotAdoptDisabledClientUnlessIncluded(t *testing.T) {
@@ -455,7 +455,6 @@ func TestConsolidationSkipsMismatchedIdentityAndIncompatibleRules(t *testing.T) 
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
 		{id: 1, inboundID: 1, enable: 1, email: "mismatch@example.com"},
 		{id: 2, inboundID: 1, enable: 1, email: "factor@example.com"},
-		{id: 3, inboundID: 1, enable: 1, email: "inbound@example.com"},
 	})
 	defer st.Close()
 
@@ -467,10 +466,6 @@ func TestConsolidationSkipsMismatchedIdentityAndIncompatibleRules(t *testing.T) 
 	if _, err := svc.Enable(ctx, EnableRequest{Email: "factor@example.com", InboundID: &inboundID, Factor: "3"}); err != nil {
 		t.Fatalf("enable factor: %v", err)
 	}
-	if _, err := svc.Enable(ctx, EnableRequest{Email: "inbound@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
-		t.Fatalf("enable inbound: %v", err)
-	}
-	corruptRuleInbound(t, dbPath, latestActiveSingleRuleID(t, dbPath), 2)
 
 	result, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID})
 	if err != nil {
@@ -487,6 +482,34 @@ func TestConsolidationSkipsMismatchedIdentityAndIncompatibleRules(t *testing.T) 
 	}
 	if got := countBulkEvents(t, dbPath, store.EventRuleSkip); got == 0 {
 		t.Fatalf("expected skip audit events")
+	}
+}
+
+func TestConsolidationFollowsClientNotStaleInboundPointer(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{
+		{id: 1, inboundID: 1, enable: 1, email: "scope@example.com"},
+		{id: 2, inboundID: 1, enable: 1, email: "pointer@example.com"},
+	})
+	defer st.Close()
+
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "pointer@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable pointer: %v", err)
+	}
+	// The stored rule inbound is stale selection metadata; consolidation follows
+	// the client, which is a member of the scope's inbound.
+	corruptRuleInbound(t, dbPath, latestActiveSingleRuleID(t, dbPath), 2)
+
+	result, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if result.Adopted != 1 {
+		t.Fatalf("adopted = %d, want 1", result.Adopted)
+	}
+	if countBulkRules(t, dbPath, store.StateMerged) != 1 {
+		t.Fatalf("compatible rule was not merged")
 	}
 }
 
@@ -520,7 +543,6 @@ type bulkTraffic struct {
 	email     string
 	up        int64
 	down      int64
-	allTime   int64
 	total     int64
 }
 
@@ -533,9 +555,10 @@ func newBulkService(t *testing.T, traffics []bulkTraffic) (*Service, *store.Stor
 	db := openBulkDB(t, dbPath)
 	for _, traffic := range traffics {
 		execBulkSQL(t, db, `
-			INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-			VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
-		`, traffic.id, traffic.inboundID, traffic.enable, traffic.email, traffic.up, traffic.down, traffic.allTime, traffic.total)
+			INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+			VALUES(?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
+		`, traffic.id, traffic.inboundID, traffic.enable, traffic.email, traffic.up, traffic.down, traffic.total)
+		insertBulkMembership(t, db, traffic.id, traffic.inboundID, traffic.email)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close sqlite: %v", err)
@@ -694,11 +717,11 @@ func assertNoActiveDuplicateTargets(t *testing.T, dbPath string) {
 	}
 }
 
-func setBulkCounters(t *testing.T, dbPath string, id, up, down, allTime int64) {
+func setBulkCounters(t *testing.T, dbPath string, id, up, down int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
-	execBulkSQL(t, db, `UPDATE client_traffics SET up=?, down=?, all_time=? WHERE id=?`, up, down, allTime, id)
+	execBulkSQL(t, db, `UPDATE client_traffics SET up=?, down=? WHERE id=?`, up, down, id)
 }
 
 func insertBulkTraffic(t *testing.T, dbPath string, traffic bulkTraffic) {
@@ -706,9 +729,16 @@ func insertBulkTraffic(t *testing.T, dbPath string, traffic bulkTraffic) {
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	execBulkSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
-	`, traffic.id, traffic.inboundID, traffic.enable, traffic.email, traffic.up, traffic.down, traffic.allTime, traffic.total)
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+		VALUES(?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
+	`, traffic.id, traffic.inboundID, traffic.enable, traffic.email, traffic.up, traffic.down, traffic.total)
+	insertBulkMembership(t, db, traffic.id, traffic.inboundID, traffic.email)
+}
+
+func insertBulkMembership(t *testing.T, db *sql.DB, clientID, inboundID int64, email string) {
+	t.Helper()
+	execBulkSQL(t, db, `INSERT INTO clients(id, email) VALUES(?, ?)`, clientID, email)
+	execBulkSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(?, ?)`, clientID, inboundID)
 }
 
 func updateBulkIdentity(t *testing.T, dbPath string, trafficID, inboundID int64, email string) {
@@ -716,6 +746,9 @@ func updateBulkIdentity(t *testing.T, dbPath string, trafficID, inboundID int64,
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	execBulkSQL(t, db, `UPDATE client_traffics SET inbound_id=?, email=? WHERE id=?`, inboundID, email, trafficID)
+	execBulkSQL(t, db, `UPDATE clients SET email=? WHERE id=?`, email, trafficID)
+	execBulkSQL(t, db, `DELETE FROM client_inbounds WHERE client_id=?`, trafficID)
+	execBulkSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(?, ?)`, trafficID, inboundID)
 }
 
 func corruptRuleInbound(t *testing.T, dbPath string, ruleID, inboundID int64) {
@@ -725,58 +758,58 @@ func corruptRuleInbound(t *testing.T, dbPath string, ruleID, inboundID int64) {
 	execBulkSQL(t, db, `UPDATE xui_factor_rules SET inbound_id=? WHERE id=?`, inboundID, ruleID)
 }
 
-func assertBulkCounters(t *testing.T, dbPath string, id, wantUp, wantDown, wantAllTime int64) {
+func assertBulkCounters(t *testing.T, dbPath string, id, wantUp, wantDown int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
-	var up, down, allTime int64
-	if err := db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=?`, id).Scan(&up, &down, &allTime); err != nil {
+	var up, down int64
+	if err := db.QueryRow(`SELECT up, down FROM client_traffics WHERE id=?`, id).Scan(&up, &down); err != nil {
 		t.Fatalf("read counters: %v", err)
 	}
-	if up != wantUp || down != wantDown || allTime != wantAllTime {
-		t.Fatalf("counters = up:%d down:%d all_time:%d, want up:%d down:%d all_time:%d", up, down, allTime, wantUp, wantDown, wantAllTime)
+	if up != wantUp || down != wantDown {
+		t.Fatalf("counters = up:%d down:%d, want up:%d down:%d", up, down, wantUp, wantDown)
 	}
 }
 
-func setBulkRuleClientState(t *testing.T, dbPath string, trafficID, remUp, remDown, remAllTime, missingSince int64) {
+func setBulkRuleClientState(t *testing.T, dbPath string, trafficID, remUp, remDown, missingSince int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	execBulkSQL(t, db, `
 		UPDATE xui_factor_rule_clients
-		SET rem_up=?, rem_down=?, rem_all_time=?, missing_since=?
+		SET rem_up=?, rem_down=?, missing_since=?
 		WHERE traffic_id=?
-	`, remUp, remDown, remAllTime, missingSince, trafficID)
+	`, remUp, remDown, missingSince, trafficID)
 }
 
-func setRuleClientDetailed(t *testing.T, dbPath string, ruleID, trafficID, lastUp, lastDown, lastAllTime, remUp, remDown, remAllTime int64) {
+func setRuleClientDetailed(t *testing.T, dbPath string, ruleID, trafficID, lastUp, lastDown, remUp, remDown int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
 	execBulkSQL(t, db, `
 		UPDATE xui_factor_rule_clients
-		SET last_up=?, last_down=?, last_all_time=?,
-			rem_up=?, rem_down=?, rem_all_time=?
+		SET last_up=?, last_down=?,
+			rem_up=?, rem_down=?
 		WHERE rule_id=? AND traffic_id=?
-	`, lastUp, lastDown, lastAllTime, remUp, remDown, remAllTime, ruleID, trafficID)
+	`, lastUp, lastDown, remUp, remDown, ruleID, trafficID)
 }
 
-func assertRuleClientDetailed(t *testing.T, dbPath string, ruleID, trafficID, wantUp, wantDown, wantAllTime, wantRemUp, wantRemDown, wantRemAllTime int64) {
+func assertRuleClientDetailed(t *testing.T, dbPath string, ruleID, trafficID, wantUp, wantDown, wantRemUp, wantRemDown int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
-	var up, down, allTime, remUp, remDown, remAllTime int64
+	var up, down, remUp, remDown int64
 	if err := db.QueryRow(`
-		SELECT last_up, last_down, last_all_time, rem_up, rem_down, rem_all_time
+		SELECT last_up, last_down, rem_up, rem_down
 		FROM xui_factor_rule_clients
 		WHERE rule_id=? AND traffic_id=?
-	`, ruleID, trafficID).Scan(&up, &down, &allTime, &remUp, &remDown, &remAllTime); err != nil {
+	`, ruleID, trafficID).Scan(&up, &down, &remUp, &remDown); err != nil {
 		t.Fatalf("read rule client detail: %v", err)
 	}
-	if up != wantUp || down != wantDown || allTime != wantAllTime || remUp != wantRemUp || remDown != wantRemDown || remAllTime != wantRemAllTime {
-		t.Fatalf("rule client detail up=%d down=%d all_time=%d rem_up=%d rem_down=%d rem_all_time=%d, want up=%d down=%d all_time=%d rem_up=%d rem_down=%d rem_all_time=%d",
-			up, down, allTime, remUp, remDown, remAllTime,
-			wantUp, wantDown, wantAllTime, wantRemUp, wantRemDown, wantRemAllTime,
+	if up != wantUp || down != wantDown || remUp != wantRemUp || remDown != wantRemDown {
+		t.Fatalf("rule client detail up=%d down=%d rem_up=%d rem_down=%d, want up=%d down=%d rem_up=%d rem_down=%d",
+			up, down, remUp, remDown,
+			wantUp, wantDown, wantRemUp, wantRemDown,
 		)
 	}
 }
@@ -803,21 +836,21 @@ func countBulkEvents(t *testing.T, dbPath, eventType string) int {
 	return count
 }
 
-func assertBulkRuleClientBaseline(t *testing.T, dbPath string, trafficID, wantUp, wantDown, wantAllTime int64) {
+func assertBulkRuleClientBaseline(t *testing.T, dbPath string, trafficID, wantUp, wantDown int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
-	var up, down, allTime, remUp, remDown, remAllTime int64
+	var up, down, remUp, remDown int64
 	var missingSince sql.NullInt64
 	if err := db.QueryRow(`
-		SELECT last_up, last_down, last_all_time, rem_up, rem_down, rem_all_time, missing_since
+		SELECT last_up, last_down, rem_up, rem_down, missing_since
 		FROM xui_factor_rule_clients
 		WHERE traffic_id=?
-	`, trafficID).Scan(&up, &down, &allTime, &remUp, &remDown, &remAllTime, &missingSince); err != nil {
+	`, trafficID).Scan(&up, &down, &remUp, &remDown, &missingSince); err != nil {
 		t.Fatalf("read rule client: %v", err)
 	}
-	if up != wantUp || down != wantDown || allTime != wantAllTime || remUp != 0 || remDown != 0 || remAllTime != 0 || missingSince.Valid {
-		t.Fatalf("unexpected baseline up=%d down=%d all_time=%d rem_up=%d rem_down=%d rem_all_time=%d missing=%v", up, down, allTime, remUp, remDown, remAllTime, missingSince.Valid)
+	if up != wantUp || down != wantDown || remUp != 0 || remDown != 0 || missingSince.Valid {
+		t.Fatalf("unexpected baseline up=%d down=%d rem_up=%d rem_down=%d missing=%v", up, down, remUp, remDown, missingSince.Valid)
 	}
 }
 

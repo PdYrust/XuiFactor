@@ -98,8 +98,8 @@ func (tx *Tx) RuleClientExists(ctx context.Context, ruleID, trafficID int64) (bo
 func (tx *Tx) RuleClient(ctx context.Context, ruleID, trafficID int64) (RuleClient, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT rule_id, traffic_id, inbound_id, email,
-			last_up, last_down, last_all_time,
-			rem_up, rem_down, rem_all_time, missing_since, updated_at
+			last_up, last_down,
+			rem_up, rem_down, missing_since, updated_at
 		FROM xui_factor_rule_clients
 		WHERE rule_id = ? AND traffic_id = ?
 	`, ruleID, trafficID)
@@ -109,8 +109,8 @@ func (tx *Tx) RuleClient(ctx context.Context, ruleID, trafficID int64) (RuleClie
 func (tx *Tx) RuleClientsForRule(ctx context.Context, ruleID int64) ([]RuleClient, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT rule_id, traffic_id, inbound_id, email,
-			last_up, last_down, last_all_time,
-			rem_up, rem_down, rem_all_time, missing_since, updated_at
+			last_up, last_down,
+			rem_up, rem_down, missing_since, updated_at
 		FROM xui_factor_rule_clients
 		WHERE rule_id = ?
 		ORDER BY traffic_id
@@ -150,12 +150,12 @@ func (tx *Tx) CopyRuleClient(ctx context.Context, fromRuleID, toRuleID, trafficI
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO xui_factor_rule_clients(
 			rule_id, traffic_id, inbound_id, email,
-			last_up, last_down, last_all_time,
-			rem_up, rem_down, rem_all_time, missing_since, updated_at
+			last_up, last_down,
+			rem_up, rem_down, missing_since, updated_at
 		)
 		SELECT ?, traffic_id, inbound_id, email,
-			last_up, last_down, last_all_time,
-			rem_up, rem_down, rem_all_time, missing_since, updated_at
+			last_up, last_down,
+			rem_up, rem_down, missing_since, updated_at
 		FROM xui_factor_rule_clients
 		WHERE rule_id = ? AND traffic_id = ?
 	`, toRuleID, fromRuleID, trafficID)
@@ -350,10 +350,8 @@ func scanRuleClient(row *sql.Row) (RuleClient, error) {
 		&rc.Email,
 		&rc.LastUp,
 		&rc.LastDown,
-		&rc.LastAllTime,
 		&rc.RemUp,
 		&rc.RemDown,
-		&rc.RemAllTime,
 		&missingSince,
 		&rc.UpdatedAt,
 	)
@@ -377,10 +375,8 @@ func scanRuleClientRows(rows *sql.Rows) (RuleClient, error) {
 		&rc.Email,
 		&rc.LastUp,
 		&rc.LastDown,
-		&rc.LastAllTime,
 		&rc.RemUp,
 		&rc.RemDown,
-		&rc.RemAllTime,
 		&missingSince,
 		&rc.UpdatedAt,
 	); err != nil {

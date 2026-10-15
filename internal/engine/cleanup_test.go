@@ -105,7 +105,7 @@ func TestStatusDoesNotCountMissingMaterializedClients(t *testing.T) {
 
 func TestCleanupPrunesDisabledSingleUserRulesAfterRetention(t *testing.T) {
 	ctx := context.Background()
-	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 10, down: 20, allTime: 30}})
+	svc, st, dbPath := newBulkService(t, []bulkTraffic{{id: 1, inboundID: 1, enable: 1, email: "a@example.com", up: 10, down: 20}})
 	defer st.Close()
 
 	if _, err := svc.Enable(ctx, EnableRequest{Email: "a@example.com", Factor: "2"}); err != nil {
@@ -126,7 +126,7 @@ func TestCleanupPrunesDisabledSingleUserRulesAfterRetention(t *testing.T) {
 	if got := countCleanupRules(t, dbPath); got != 0 {
 		t.Fatalf("rules = %d, want 0", got)
 	}
-	assertBulkCounters(t, dbPath, 1, 10, 20, 30)
+	assertBulkCounters(t, dbPath, 1, 10, 20)
 }
 
 func TestCleanupPrunesMergedRulesAfterRetention(t *testing.T) {

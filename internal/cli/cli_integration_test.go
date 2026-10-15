@@ -13,7 +13,7 @@ import (
 func TestCLITickSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "smoke@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "smoke@example.com", 100, 200)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -29,7 +29,7 @@ func TestCLITickSmoke(t *testing.T) {
 	}
 
 	run("enable", "--email", "smoke@example.com", "--factor", "5")
-	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	setCLITestCounters(t, dbPath, 1, 110, 220)
 
 	if output := run("tick"); !strings.Contains(output, "applied: 1") {
 		t.Fatalf("expected tick apply output, got %q", output)
@@ -52,8 +52,8 @@ func TestCLITickSmoke(t *testing.T) {
 func TestCLIBulkLifecycleSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 1, "b@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 1, "b@example.com", 400, 500)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -88,8 +88,8 @@ func TestCLIBulkLifecycleSmoke(t *testing.T) {
 func TestCLIPersistentScopeSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 2, "b@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 2, "b@example.com", 400, 500)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -110,7 +110,7 @@ func TestCLIPersistentScopeSmoke(t *testing.T) {
 	if output := run("status"); !strings.Contains(output, "scope=inbound:1") || !strings.Contains(output, "clients=1") {
 		t.Fatalf("expected inbound scope status, got %q", output)
 	}
-	insertCLITestTraffic(t, dbPath, 3, 1, "c@example.com", 1000, 2000, 3000)
+	insertCLITestTraffic(t, dbPath, 3, 1, "c@example.com", 1000, 2000)
 	if output := run("tick"); !strings.Contains(output, "enrolled: 1") {
 		t.Fatalf("expected tick enrollment, got %q", output)
 	}
@@ -125,7 +125,7 @@ func TestCLIPersistentScopeSmoke(t *testing.T) {
 func TestCLIEnableAllOnceSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -143,7 +143,7 @@ func TestCLIEnableAllOnceSmoke(t *testing.T) {
 	if output := run("enable-all", "--inbound-id", "1", "--factor", "2", "--once"); !strings.Contains(output, "mode: snapshot") || !strings.Contains(output, "enrolled: 1") {
 		t.Fatalf("expected snapshot summary, got %q", output)
 	}
-	insertCLITestTraffic(t, dbPath, 2, 1, "future@example.com", 1000, 2000, 3000)
+	insertCLITestTraffic(t, dbPath, 2, 1, "future@example.com", 1000, 2000)
 	if output := run("tick"); !strings.Contains(output, "enrolled: 0") {
 		t.Fatalf("expected no snapshot enrollment, got %q", output)
 	}
@@ -152,8 +152,8 @@ func TestCLIEnableAllOnceSmoke(t *testing.T) {
 func TestCLIExcludeSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "excluded@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 1, "active@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 1, 1, "excluded@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 1, "active@example.com", 400, 500)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -181,13 +181,13 @@ func TestCLIExcludeSmoke(t *testing.T) {
 	if output := run("status"); !strings.Contains(output, "excludes: 1") || !strings.Contains(output, "effective=1") || !strings.Contains(output, "Policies") {
 		t.Fatalf("expected status exclude output, got %q", output)
 	}
-	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
-	setCLITestCounters(t, dbPath, 2, 410, 520, 930)
+	setCLITestCounters(t, dbPath, 1, 110, 220)
+	setCLITestCounters(t, dbPath, 2, 410, 520)
 	if output := run("tick"); !strings.Contains(output, "active clients: 1") || !strings.Contains(output, "applied: 1") {
 		t.Fatalf("expected tick exclude output, got %q", output)
 	}
-	assertCLITestCounters(t, dbPath, 1, 110, 220, 330)
-	assertCLITestCounters(t, dbPath, 2, 420, 540, 960)
+	assertCLITestCounters(t, dbPath, 1, 110, 220)
+	assertCLITestCounters(t, dbPath, 2, 420, 540)
 	if output := run("unexclude", "--email", "excluded@example.com", "--inbound-id", "1"); !strings.Contains(output, "unexclude: policy disabled") {
 		t.Fatalf("expected unexclude summary, got %q", output)
 	}
@@ -202,8 +202,8 @@ func TestCLIExcludeSmoke(t *testing.T) {
 func TestCLIOverrideSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "override@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 1, "scope@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 1, 1, "override@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 1, "scope@example.com", 400, 500)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -231,13 +231,13 @@ func TestCLIOverrideSmoke(t *testing.T) {
 	if output := run("status"); !strings.Contains(output, "overrides: 1") || !strings.Contains(output, "effective=1") || !strings.Contains(output, "override  email=override@example.com") {
 		t.Fatalf("expected status override output, got %q", output)
 	}
-	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
-	setCLITestCounters(t, dbPath, 2, 410, 520, 930)
+	setCLITestCounters(t, dbPath, 1, 110, 220)
+	setCLITestCounters(t, dbPath, 2, 410, 520)
 	if output := run("tick"); !strings.Contains(output, "active clients: 2") || !strings.Contains(output, "applied: 2") {
 		t.Fatalf("expected tick override output, got %q", output)
 	}
-	assertCLITestCounters(t, dbPath, 1, 112, 224, 336)
-	assertCLITestCounters(t, dbPath, 2, 420, 540, 960)
+	assertCLITestCounters(t, dbPath, 1, 112, 224)
+	assertCLITestCounters(t, dbPath, 2, 420, 540)
 	if output := run("remove-override", "--email", "override@example.com", "--inbound-id", "1"); !strings.Contains(output, "remove-override: policy disabled") {
 		t.Fatalf("expected remove-override summary, got %q", output)
 	}
@@ -252,7 +252,7 @@ func TestCLIOverrideSmoke(t *testing.T) {
 func TestCLIExcludeWinsOverOverrideSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "policy@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "policy@example.com", 100, 200)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -273,11 +273,11 @@ func TestCLIExcludeWinsOverOverrideSmoke(t *testing.T) {
 	if output := run("status"); !strings.Contains(output, "excludes: 1") || !strings.Contains(output, "overrides: 1") || !strings.Contains(output, "effective factored clients: 0") {
 		t.Fatalf("expected exclude to win in status, got %q", output)
 	}
-	setCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	setCLITestCounters(t, dbPath, 1, 110, 220)
 	if output := run("tick"); !strings.Contains(output, "active clients: 0") || !strings.Contains(output, "applied: 0") {
 		t.Fatalf("expected exclude to suppress override in tick, got %q", output)
 	}
-	assertCLITestCounters(t, dbPath, 1, 110, 220, 330)
+	assertCLITestCounters(t, dbPath, 1, 110, 220)
 }
 
 func TestCLIDoctorReportsOverrideCounts(t *testing.T) {
@@ -286,7 +286,7 @@ func TestCLIDoctorReportsOverrideCounts(t *testing.T) {
 	backupDir := filepath.Join(dir, "backups")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "override@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "override@example.com", 100, 200)
 	writeCLITestConfig(t, configPath, dbPath, backupDir)
 
 	var out, errOut bytes.Buffer
@@ -313,9 +313,9 @@ func TestCLIDoctorReportsOverrideCounts(t *testing.T) {
 func TestCLIExplainAndEffectiveStatusSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "free@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 1, "override@example.com", 400, 500, 900)
-	insertCLITestTraffic(t, dbPath, 3, 1, "scope@example.com", 1000, 2000, 3000)
+	insertCLITestTraffic(t, dbPath, 1, 1, "free@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 1, "override@example.com", 400, 500)
+	insertCLITestTraffic(t, dbPath, 3, 1, "scope@example.com", 1000, 2000)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -355,7 +355,7 @@ func TestCLIStatusClientsWithoutInboundIsLimited(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
 	for i := 1; i <= 55; i++ {
-		insertCLITestTraffic(t, dbPath, int64(i), 1, fmt.Sprintf("user-%02d@example.com", i), 100, 200, 300)
+		insertCLITestTraffic(t, dbPath, int64(i), 1, fmt.Sprintf("user-%02d@example.com", i), 100, 200)
 	}
 
 	var out, errOut bytes.Buffer
@@ -372,9 +372,9 @@ func TestCLIStatusClientsWithoutInboundIsLimited(t *testing.T) {
 func TestCLIReportAndAuditFiltersSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "free@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 1, "override@example.com", 400, 500, 900)
-	insertCLITestTraffic(t, dbPath, 3, 1, "scope@example.com", 1000, 2000, 3000)
+	insertCLITestTraffic(t, dbPath, 1, 1, "free@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 1, "override@example.com", 400, 500)
+	insertCLITestTraffic(t, dbPath, 3, 1, "scope@example.com", 1000, 2000)
 	withMockDoctorService(t, "enabled", "active", true)
 
 	var out, errOut bytes.Buffer
@@ -393,8 +393,8 @@ func TestCLIReportAndAuditFiltersSmoke(t *testing.T) {
 	run("enable-all", "--inbound-id", "1", "--factor", "2")
 	run("exclude", "--email", "free@example.com", "--inbound-id", "1")
 	run("override", "--email", "override@example.com", "--inbound-id", "1", "--factor", "1.2")
-	setCLITestCounters(t, dbPath, 2, 500, 600, 1100)
-	setCLITestCounters(t, dbPath, 3, 1200, 2300, 3500)
+	setCLITestCounters(t, dbPath, 2, 500, 600)
+	setCLITestCounters(t, dbPath, 3, 1200, 2300)
 	run("tick")
 
 	report := run("report")
@@ -447,8 +447,8 @@ func TestCLIFinalBetaMajorCommandsSmoke(t *testing.T) {
 	backupDir := filepath.Join(dir, "backups")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "alpha@example.com", 100, 200, 300)
-	insertCLITestTraffic(t, dbPath, 2, 1, "beta@example.com", 400, 500, 900)
+	insertCLITestTraffic(t, dbPath, 1, 1, "alpha@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 2, 1, "beta@example.com", 400, 500)
 	writeCLITestConfig(t, configPath, dbPath, backupDir)
 	withMockDoctorService(t, "enabled", "active", true)
 
@@ -483,7 +483,7 @@ func TestCLIFinalBetaMajorCommandsSmoke(t *testing.T) {
 	}
 	run("pause", "--email", "alpha@example.com", "--inbound-id", "1")
 	run("resume", "--email", "alpha@example.com", "--inbound-id", "1")
-	setCLITestCounters(t, dbPath, 1, 150, 250, 400)
+	setCLITestCounters(t, dbPath, 1, 150, 250)
 	run("tick")
 	run("explain", "--email", "alpha@example.com", "--inbound-id", "1")
 	run("audit", "--limit", "5")
@@ -547,7 +547,7 @@ func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
 func TestCLICleanupSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "a@example.com", 100, 200)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -594,7 +594,7 @@ func TestCLICleanupSmoke(t *testing.T) {
 func TestCLIReconcileSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "legacy@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "legacy@example.com", 100, 200)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -640,7 +640,7 @@ func TestCLIConfigFlagDoctorAndBackup(t *testing.T) {
 	backupDir := filepath.Join(dir, "backups")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "doctor@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "doctor@example.com", 100, 200)
 	writeCLITestConfig(t, configPath, dbPath, backupDir)
 	t.Setenv("XUI_FACTOR_CONFIG", filepath.Join(dir, "ignored-config.json"))
 
@@ -726,7 +726,7 @@ func TestCLIDoctorWarnsWhenActiveRulesExistButServiceInactive(t *testing.T) {
 	dbPath := filepath.Join(dir, "x-ui.db")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "warn@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "warn@example.com", 100, 200)
 	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
 
 	var out, errOut bytes.Buffer
@@ -755,7 +755,7 @@ func TestCLIDoctorWarnsWhenPersistentScopesNeedService(t *testing.T) {
 	dbPath := filepath.Join(dir, "x-ui.db")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "scope@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "scope@example.com", 100, 200)
 	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
 
 	var out, errOut bytes.Buffer
@@ -917,17 +917,23 @@ func TestCLIDoctorMissingRequiredColumn(t *testing.T) {
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
 	execCLITestSQL(t, db, `CREATE TABLE inbounds (id INTEGER PRIMARY KEY)`)
+	execCLITestSQL(t, db, `CREATE TABLE clients (
+		id INTEGER PRIMARY KEY,
+		email TEXT
+	)`)
+	execCLITestSQL(t, db, `CREATE TABLE client_inbounds (
+		client_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL
+	)`)
 	execCLITestSQL(t, db, `
 		CREATE TABLE client_traffics (
 			id INTEGER,
 			inbound_id INTEGER,
 			enable numeric,
-			email TEXT,
+			email TEXT UNIQUE,
 			up INTEGER,
 			down INTEGER,
-			all_time INTEGER,
 			expiry_time INTEGER,
-			total INTEGER,
 			reset INTEGER
 		)
 	`)
@@ -938,7 +944,7 @@ func TestCLIDoctorMissingRequiredColumn(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("doctor succeeded with missing column, stdout=%q", out.String())
 	}
-	if !strings.Contains(errOut.String(), "missing client_traffics.last_online") {
+	if !strings.Contains(errOut.String(), "missing client_traffics.total") {
 		t.Fatalf("expected missing column error, got %q", errOut.String())
 	}
 }
@@ -972,7 +978,7 @@ func TestCLIStatusAndAuditUseReadOnlyDatabase(t *testing.T) {
 	dbPath := filepath.Join(dir, "x-ui.db")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "readonly@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "readonly@example.com", 100, 200)
 	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
 
 	var out, errOut bytes.Buffer
@@ -1014,7 +1020,7 @@ func TestCLIWriteCommandRequiresWritableDatabase(t *testing.T) {
 	dbPath := filepath.Join(dir, "x-ui.db")
 	configPath := filepath.Join(dir, "config.json")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "write@example.com", 100, 200, 300)
+	insertCLITestTraffic(t, dbPath, 1, 1, "write@example.com", 100, 200)
 	writeCLITestConfig(t, configPath, dbPath, filepath.Join(dir, "backups"))
 	if err := os.Chmod(dbPath, 0o444); err != nil {
 		t.Fatalf("chmod db read-only: %v", err)
@@ -1086,15 +1092,22 @@ func createCLITestSchema(t *testing.T, dbPath string) {
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
 	execCLITestSQL(t, db, `CREATE TABLE inbounds (id INTEGER PRIMARY KEY)`)
+	execCLITestSQL(t, db, `CREATE TABLE clients (
+		id INTEGER PRIMARY KEY,
+		email TEXT
+	)`)
+	execCLITestSQL(t, db, `CREATE TABLE client_inbounds (
+		client_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL
+	)`)
 	execCLITestSQL(t, db, `
 		CREATE TABLE client_traffics (
 			id INTEGER,
 			inbound_id INTEGER,
 			enable numeric,
-			email TEXT,
+			email TEXT UNIQUE,
 			up INTEGER,
 			down INTEGER,
-			all_time INTEGER,
 			expiry_time INTEGER,
 			total INTEGER,
 			reset INTEGER,
@@ -1103,33 +1116,35 @@ func createCLITestSchema(t *testing.T, dbPath string) {
 	`)
 }
 
-func insertCLITestTraffic(t *testing.T, dbPath string, id, inboundID int64, email string, up, down, allTime int64) {
+func insertCLITestTraffic(t *testing.T, dbPath string, id, inboundID int64, email string, up, down int64) {
 	t.Helper()
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
 	execCLITestSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(?, ?, 1, ?, ?, ?, ?, 0, 0, 0, 0)
-	`, id, inboundID, email, up, down, allTime)
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+		VALUES(?, ?, 1, ?, ?, ?, 0, 0, 0, 0)
+	`, id, inboundID, email, up, down)
+	execCLITestSQL(t, db, `INSERT INTO clients(id, email) VALUES(?, ?)`, id, email)
+	execCLITestSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(?, ?)`, id, inboundID)
 }
 
-func setCLITestCounters(t *testing.T, dbPath string, id, up, down, allTime int64) {
+func setCLITestCounters(t *testing.T, dbPath string, id, up, down int64) {
 	t.Helper()
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
-	execCLITestSQL(t, db, `UPDATE client_traffics SET up=?, down=?, all_time=? WHERE id=?`, up, down, allTime, id)
+	execCLITestSQL(t, db, `UPDATE client_traffics SET up=?, down=? WHERE id=?`, up, down, id)
 }
 
-func assertCLITestCounters(t *testing.T, dbPath string, id, wantUp, wantDown, wantAllTime int64) {
+func assertCLITestCounters(t *testing.T, dbPath string, id, wantUp, wantDown int64) {
 	t.Helper()
 	db := openCLITestDB(t, dbPath)
 	defer db.Close()
-	var up, down, allTime int64
-	if err := db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=?`, id).Scan(&up, &down, &allTime); err != nil {
+	var up, down int64
+	if err := db.QueryRow(`SELECT up, down FROM client_traffics WHERE id=?`, id).Scan(&up, &down); err != nil {
 		t.Fatalf("read counters: %v", err)
 	}
-	if up != wantUp || down != wantDown || allTime != wantAllTime {
-		t.Fatalf("traffic %d counters = up=%d down=%d all_time=%d, want up=%d down=%d all_time=%d", id, up, down, allTime, wantUp, wantDown, wantAllTime)
+	if up != wantUp || down != wantDown {
+		t.Fatalf("traffic %d counters = up=%d down=%d, want up=%d down=%d", id, up, down, wantUp, wantDown)
 	}
 }
 
@@ -1203,6 +1218,7 @@ func execCLITestSQL(t *testing.T, db *sql.DB, query string, args ...any) {
 func writeCLITestConfig(t *testing.T, configPath, dbPath, backupDir string) {
 	t.Helper()
 	data := `{
+  "database_backend": "sqlite",
   "database_path": "` + dbPath + `",
   "poll_interval": "5s",
   "busy_timeout": "5s",

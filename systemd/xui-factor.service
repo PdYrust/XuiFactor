@@ -3,6 +3,12 @@ Description=XuiFactor 3x-ui traffic factor sidecar
 After=network.target x-ui.service
 
 [Service]
+# Import the XUI_DB_TYPE and XUI_DB_DSN variables 3x-ui writes into its
+# service environment file, so a PostgreSQL panel is detected automatically.
+# Each distro layout is optional.
+EnvironmentFile=-/etc/default/x-ui
+EnvironmentFile=-/etc/conf.d/x-ui
+EnvironmentFile=-/etc/sysconfig/x-ui
 Type=simple
 User=root
 Group=root

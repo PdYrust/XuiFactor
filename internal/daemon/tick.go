@@ -160,11 +160,16 @@ func (r *Runner) refreshSuppressedBaseline(ctx context.Context, tx *store.Tx, ta
 		}
 		return err
 	}
-	if current.InboundID != target.Client.InboundID || current.Email != target.Client.Email {
+	if current.Email != target.Client.Email {
 		_, markErr := r.markMissing(ctx, tx, target, now)
 		return markErr
 	}
-	return tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, 0, now))
+	if current.InboundID != target.Client.InboundID {
+		if err := tx.AdoptRuleClientInbound(ctx, target.Client.RuleID, target.Client.TrafficID, current.InboundID, now); err != nil {
+			return err
+		}
+	}
+	return tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, now))
 }
 
 func (r *Runner) runAutoCleanup(ctx context.Context, now int64) {
@@ -253,14 +258,13 @@ func (r *Runner) reconcileScopes(ctx context.Context, tx *store.Tx, now int64) (
 			}
 
 			if err := tx.CreateRuleClient(ctx, store.RuleClient{
-				RuleID:      scope.RuleID,
-				TrafficID:   client.ID,
-				InboundID:   client.InboundID,
-				Email:       client.Email,
-				LastUp:      client.Up,
-				LastDown:    client.Down,
-				LastAllTime: client.AllTime,
-				UpdatedAt:   now,
+				RuleID:    scope.RuleID,
+				TrafficID: client.ID,
+				InboundID: client.InboundID,
+				Email:     client.Email,
+				LastUp:    client.Up,
+				LastDown:  client.Down,
+				UpdatedAt: now,
 			}); err != nil {
 				return 0, 0, err
 			}
@@ -289,11 +293,17 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 		}
 		return targetResult{}, err
 	}
-	if current.InboundID != target.Client.InboundID || current.Email != target.Client.Email {
+	if current.Email != target.Client.Email {
 		return r.markMissing(ctx, tx, target, now)
 	}
+	if current.InboundID != target.Client.InboundID {
+		if err := tx.AdoptRuleClientInbound(ctx, target.Client.RuleID, target.Client.TrafficID, current.InboundID, now); err != nil {
+			return targetResult{}, err
+		}
+		target.Client.InboundID = current.InboundID
+	}
 	if target.Client.MissingAt != nil {
-		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, 0, now)); err != nil {
+		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, now)); err != nil {
 			return targetResult{}, err
 		}
 		message := fmt.Sprintf("traffic id %d returned; baseline refreshed", target.Client.TrafficID)
@@ -311,37 +321,25 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	if err != nil {
 		return targetResult{}, err
 	}
-	_, allTimeDecreased, err := counterDelta(current.AllTime, target.Client.LastAllTime)
-	if err != nil {
-		return targetResult{}, err
-	}
-	if upDecreased || downDecreased || allTimeDecreased {
+	if upDecreased || downDecreased {
 		return r.rebaseline(ctx, tx, target, current, now)
 	}
 
 	if target.Rule.FactorPPM == engine.FactorScale {
 		if current.Up == target.Client.LastUp &&
 			current.Down == target.Client.LastDown &&
-			current.AllTime == target.Client.LastAllTime &&
 			target.Client.MissingAt == nil &&
 			target.Client.RemUp == 0 &&
-			target.Client.RemDown == 0 &&
-			target.Client.RemAllTime == 0 {
+			target.Client.RemDown == 0 {
 			return targetResult{}, nil
 		}
-		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, 0, now)); err != nil {
+		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, now)); err != nil {
 			return targetResult{}, err
 		}
 		return targetResult{Baselined: 1}, nil
 	}
 
 	if rawUpDelta == 0 && rawDownDelta == 0 {
-		if current.AllTime != target.Client.LastAllTime || target.Client.MissingAt != nil {
-			if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, target.Client.RemUp, target.Client.RemDown, target.Client.RemAllTime, now)); err != nil {
-				return targetResult{}, err
-			}
-			return targetResult{Baselined: 1}, nil
-		}
 		return targetResult{}, nil
 	}
 
@@ -354,13 +352,9 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	if err != nil {
 		return targetResult{}, err
 	}
-	extraAllTime, err := safeAdd(extraUp, extraDown)
-	if err != nil {
-		return targetResult{}, err
-	}
 
 	if extraUp == 0 && extraDown == 0 {
-		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, remUp, remDown, target.Client.RemAllTime, now)); err != nil {
+		if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, remUp, remDown, now)); err != nil {
 			return targetResult{}, err
 		}
 		return targetResult{Baselined: 1}, nil
@@ -374,7 +368,7 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	if err != nil {
 		return targetResult{}, err
 	}
-	newAllTime, err := safeAdd(current.AllTime, extraAllTime)
+	extraTotal, err := safeAdd(extraUp, extraDown)
 	if err != nil {
 		return targetResult{}, err
 	}
@@ -385,7 +379,7 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 		}
 	}
 
-	ok, err := tx.UpdateClientCountersCAS(ctx, current, newUp, newDown, newAllTime)
+	ok, err := tx.UpdateClientCountersCAS(ctx, current, newUp, newDown)
 	if err != nil {
 		return targetResult{}, err
 	}
@@ -394,19 +388,19 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	}
 
 	if err := tx.UpdateRuleClientBaseline(ctx, store.RuleClient{
-		RuleID:      target.Client.RuleID,
-		TrafficID:   target.Client.TrafficID,
-		LastUp:      newUp,
-		LastDown:    newDown,
-		LastAllTime: newAllTime,
-		RemUp:       remUp,
-		RemDown:     remDown,
-		RemAllTime:  target.Client.RemAllTime,
-		UpdatedAt:   now,
+		RuleID:    target.Client.RuleID,
+		TrafficID: target.Client.TrafficID,
+		LastUp:    newUp,
+		LastDown:  newDown,
+		RemUp:     remUp,
+		RemDown:   remDown,
+		UpdatedAt: now,
 	}); err != nil {
 		return targetResult{}, err
 	}
-	message := fmt.Sprintf("traffic id %d inbound %d email %s extra_up=%d extra_down=%d extra_all_time=%d", target.Client.TrafficID, target.Client.InboundID, target.Client.Email, extraUp, extraDown, extraAllTime)
+	// extra_all_time is the historical field name; it carries the total factored
+	// bytes so report aggregation stays compatible across releases.
+	message := fmt.Sprintf("traffic id %d inbound %d email %s extra_up=%d extra_down=%d extra_all_time=%d", target.Client.TrafficID, target.Client.InboundID, target.Client.Email, extraUp, extraDown, extraTotal)
 	if err := tx.AddEvent(ctx, &target.Rule.ID, store.EventTrafficApply, message, now); err != nil {
 		return targetResult{}, err
 	}
@@ -427,7 +421,7 @@ func (r *Runner) markMissing(ctx context.Context, tx *store.Tx, target store.Act
 }
 
 func (r *Runner) rebaseline(ctx context.Context, tx *store.Tx, target store.ActiveRuleClient, current store.ClientTraffic, now int64) (targetResult, error) {
-	if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, 0, now)); err != nil {
+	if err := tx.UpdateRuleClientBaseline(ctx, baseline(target, current, 0, 0, now)); err != nil {
 		return targetResult{}, err
 	}
 	message := fmt.Sprintf("traffic id %d counters decreased; baseline refreshed", target.Client.TrafficID)
@@ -437,17 +431,15 @@ func (r *Runner) rebaseline(ctx context.Context, tx *store.Tx, target store.Acti
 	return targetResult{Rebaselined: 1}, nil
 }
 
-func baseline(target store.ActiveRuleClient, current store.ClientTraffic, remUp, remDown, remAllTime, now int64) store.RuleClient {
+func baseline(target store.ActiveRuleClient, current store.ClientTraffic, remUp, remDown, now int64) store.RuleClient {
 	return store.RuleClient{
-		RuleID:      target.Client.RuleID,
-		TrafficID:   target.Client.TrafficID,
-		LastUp:      current.Up,
-		LastDown:    current.Down,
-		LastAllTime: current.AllTime,
-		RemUp:       remUp,
-		RemDown:     remDown,
-		RemAllTime:  remAllTime,
-		UpdatedAt:   now,
+		RuleID:    target.Client.RuleID,
+		TrafficID: target.Client.TrafficID,
+		LastUp:    current.Up,
+		LastDown:  current.Down,
+		RemUp:     remUp,
+		RemDown:   remDown,
+		UpdatedAt: now,
 	}
 }
 
