@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type RuleCounts struct {
 	Active   int
@@ -9,7 +12,7 @@ type RuleCounts struct {
 }
 
 func (s *Store) CountRules(ctx context.Context) (RuleCounts, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.queryContext(ctx, `
 		SELECT state, COUNT(*)
 		FROM xui_factor_rules
 		GROUP BY state
@@ -43,7 +46,7 @@ func (s *Store) CountRules(ctx context.Context) (RuleCounts, error) {
 
 func (s *Store) CountActivePersistentScopes(ctx context.Context) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, `
+	err := s.queryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM xui_factor_scopes s
 		INNER JOIN xui_factor_rules r ON r.id = s.rule_id
@@ -56,16 +59,22 @@ func (s *Store) CountActiveRuleClients(ctx context.Context, inboundID *int64) (i
 	query := `
 		SELECT COUNT(*)
 		FROM xui_factor_rule_clients rc
-		INNER JOIN xui_factor_rules r ON r.id = rc.rule_id
-		WHERE r.state = ?
-			AND rc.missing_since IS NULL`
+		INNER JOIN xui_factor_rules r ON r.id = rc.rule_id`
+	where := []string{
+		"r.state = ?",
+		"rc.missing_since IS NULL",
+	}
 	args := []any{StateActive}
 	if inboundID != nil {
+		// Count through the authoritative clients/client_inbounds link so a
+		// drifted client_traffics.inbound_id pointer does not hide clients.
 		query += `
-			AND rc.inbound_id = ?`
+		INNER JOIN client_traffics ct ON ct.id = rc.traffic_id AND ct.email = rc.email`
+		where = append(where, clientInboundMembership("ct.email"))
 		args = append(args, *inboundID)
 	}
+	query += " WHERE " + strings.Join(where, " AND ")
 	var count int
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	err := s.queryRowContext(ctx, query, args...).Scan(&count)
 	return count, err
 }

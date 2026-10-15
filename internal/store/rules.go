@@ -10,10 +10,10 @@ import (
 )
 
 func (tx *Tx) FindClient(ctx context.Context, email string, inboundID *int64) (ClientTraffic, error) {
-	query := "SELECT id, inbound_id, enable, email, up, down, all_time, total FROM client_traffics WHERE email=?"
+	query := "SELECT id, inbound_id, " + enableAsIntExpr(tx.driver) + ", email, up, down, total FROM client_traffics WHERE email=?"
 	args := []any{email}
 	if inboundID != nil {
-		query += " AND inbound_id=?"
+		query += " AND " + clientInboundMembership("client_traffics.email")
 		args = append(args, *inboundID)
 	}
 	query += " ORDER BY id LIMIT 2"
@@ -27,7 +27,7 @@ func (tx *Tx) FindClient(ctx context.Context, email string, inboundID *int64) (C
 	var matches []ClientTraffic
 	for rows.Next() {
 		var c ClientTraffic
-		if err := rows.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.AllTime, &c.Total); err != nil {
+		if err := rows.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.Total); err != nil {
 			return ClientTraffic{}, err
 		}
 		matches = append(matches, c)
@@ -59,28 +59,24 @@ func (tx *Tx) ActiveRuleForTraffic(ctx context.Context, trafficID int64) (Rule, 
 }
 
 func (tx *Tx) CreateRule(ctx context.Context, rule Rule) (int64, error) {
-	result, err := tx.ExecContext(ctx, `
+	return tx.insertReturningID(ctx, `
 		INSERT INTO xui_factor_rules(
 			name, inbound_id, email, factor_ppm, state,
 			created_at, updated_at, activated_at, paused_at, disabled_at
 		)
 		VALUES(NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
 	`, rule.Name, rule.InboundID, rule.Email, rule.FactorPPM, rule.State, rule.CreatedAt, rule.UpdatedAt, rule.ActivatedAt)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
 }
 
 func (tx *Tx) CreateRuleClient(ctx context.Context, rc RuleClient) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO xui_factor_rule_clients(
 			rule_id, traffic_id, inbound_id, email,
-			last_up, last_down, last_all_time,
-			rem_up, rem_down, rem_all_time, missing_since, updated_at
+			last_up, last_down,
+			rem_up, rem_down, missing_since, updated_at
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?)
-	`, rc.RuleID, rc.TrafficID, rc.InboundID, rc.Email, rc.LastUp, rc.LastDown, rc.LastAllTime, rc.UpdatedAt)
+		VALUES(?, ?, ?, ?, ?, ?, 0, 0, NULL, ?)
+	`, rc.RuleID, rc.TrafficID, rc.InboundID, rc.Email, rc.LastUp, rc.LastDown, rc.UpdatedAt)
 	return err
 }
 
@@ -220,8 +216,8 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 				rc.missing_since IS NULL
 					AND ct.id IS NOT NULL
 					AND (
-						(s.rule_id IS NULL AND ct.enable = 1)
-						OR (s.rule_id IS NOT NULL AND (s.include_disabled_clients = 1 OR ct.enable = 1))
+						(s.rule_id IS NULL AND ` + enableTrueExpr(s.driver, "ct.") + `)
+						OR (s.rule_id IS NOT NULL AND (s.include_disabled_clients = 1 OR ` + enableTrueExpr(s.driver, "ct.") + `))
 					)
 					AND (
 						s.rule_id IS NOT NULL
@@ -243,7 +239,6 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 						SELECT 1
 						FROM xui_factor_excludes ex
 						WHERE ex.traffic_id = rc.traffic_id
-							AND ex.inbound_id = rc.inbound_id
 							AND ex.email = rc.email
 							AND ex.state = ?
 					)`
@@ -255,7 +250,6 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 						SELECT 1
 						FROM xui_factor_overrides ov
 						WHERE ov.traffic_id = rc.traffic_id
-							AND ov.inbound_id = rc.inbound_id
 							AND ov.email = rc.email
 							AND ov.state = ?
 					)`
@@ -272,17 +266,16 @@ func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, er
 		LEFT JOIN xui_factor_rule_clients rc ON rc.rule_id = r.id
 		LEFT JOIN client_traffics ct
 			ON ct.id = rc.traffic_id
-			AND ct.inbound_id = rc.inbound_id
 			AND ct.email = rc.email
 		LEFT JOIN xui_factor_scopes s ON s.rule_id = r.id`
 	if includeDisabled {
-		query += " GROUP BY r.id ORDER BY r.id"
+		query += " GROUP BY r.id, s.rule_id ORDER BY r.id"
 	} else {
-		query += " WHERE r.state IN (?, ?) GROUP BY r.id ORDER BY r.id"
+		query += " WHERE r.state IN (?, ?) GROUP BY r.id, s.rule_id ORDER BY r.id"
 		args = append(args, StateActive, StatePaused)
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +335,7 @@ func (s *Store) ListEvents(ctx context.Context, filter EventFilter) ([]Event, er
 		args = append(args, limit)
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

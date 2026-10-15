@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/PdYrust/XuiFactor/internal/buildinfo"
+	"github.com/PdYrust/XuiFactor/internal/config"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -30,9 +31,38 @@ func TestRunHelp(t *testing.T) {
 		"xui-factor doctor",
 		"xui-factor tick",
 		"xui-factor run",
+		"Project:",
+		"creator: YrustPd",
+		"repository: https://github.com/PdYrust/XuiFactor",
+		"channel: https://t.me/PdYrust",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected help output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestBareInvocationShowsBriefUsage(t *testing.T) {
+	var out bytes.Buffer
+	app := New(&out, nil)
+
+	if code := app.Run(nil); code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	output := out.String()
+	for _, want := range []string{
+		"Usage:",
+		"enable-all Enable factor rules for selected clients",
+		"Flags:",
+		`Run "xui-factor --help" for command examples.`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected brief usage to contain %q, got %q", want, output)
+		}
+	}
+	for _, unwanted := range []string{"Examples:", "xui-factor enable-all --factor", "Project:"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("bare invocation should not print %q: %q", unwanted, output)
 		}
 	}
 }
@@ -51,7 +81,13 @@ func TestRunVersion(t *testing.T) {
 	}
 
 	output := out.String()
-	for _, want := range []string{"XuiFactor 1.2.3", "commit: abc123", "built: 2026-05-16T00:00:00Z"} {
+	for _, want := range []string{
+		"XuiFactor 1.2.3",
+		"commit: abc123",
+		"built: 2026-05-16T00:00:00Z",
+		"repository: https://github.com/PdYrust/XuiFactor",
+		"channel: https://t.me/PdYrust",
+	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected version output to contain %q, got %q", want, output)
 		}
@@ -114,63 +150,80 @@ func TestUnknownCommand(t *testing.T) {
 	}
 }
 
-func TestStableReleaseMetadata(t *testing.T) {
+func TestDatabaseFlagSelectsSQLiteBackend(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	data := `{"database_backend":"postgres","database_dsn":"postgres://xui@127.0.0.1/xui"}`
+	if err := os.WriteFile(configPath, []byte(data), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := loadConfig(commonOptions{configPath: configPath, databasePath: "/tmp/x-ui.db"})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.ResolvedBackend() != config.BackendSQLite || cfg.DatabasePath != "/tmp/x-ui.db" {
+		t.Fatalf("flag did not select the sqlite backend: backend=%s path=%s", cfg.ResolvedBackend(), cfg.DatabasePath)
+	}
+}
+
+func TestReleaseMetadata(t *testing.T) {
 	version := strings.TrimSpace(readRepoFile(t, "VERSION"))
-	if version != "0.4.0" {
-		t.Fatalf("expected VERSION to be 0.4.0, got %q", version)
+	if version != "0.5.0-beta" {
+		t.Fatalf("expected VERSION to be 0.5.0-beta, got %q", version)
 	}
 
 	readme := readRepoFile(t, "README.md")
 	for _, want := range []string{
-		"xui-factor_v0.4.0_linux_amd64.tar.gz",
+		"xui-factor_v0.5.0-beta_linux_amd64.tar.gz",
 		"license-AGPL--3.0-111111",
-		"status-stable-111111",
+		"status-beta-111111",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Fatalf("expected README to contain %q", want)
 		}
 	}
-	if strings.Contains(readme, "xui-factor_v0.3.5-beta") {
-		t.Fatalf("README still contains stale v0.3.5-beta package examples")
+	if strings.Contains(readme, "xui-factor_v0.4.0_linux") {
+		t.Fatalf("README still contains stale v0.4.0 package examples")
+	}
+	if strings.Contains(readme, "xui-factor_v0.5.0_linux") {
+		t.Fatalf("README still contains stale stable v0.5.0 package examples")
 	}
 
 	operations := readRepoFile(t, "docs/OPERATIONS.md")
-	if !strings.Contains(operations, "xui-factor_v0.4.0_linux_amd64.tar.gz") {
-		t.Fatalf("operations guide does not contain v0.4.0 package example")
+	if !strings.Contains(operations, "xui-factor_v0.5.0-beta_linux_amd64.tar.gz") {
+		t.Fatalf("operations guide does not contain the v0.5.0-beta package example")
 	}
-	if strings.Contains(operations, "xui-factor_v0.3.5-beta") {
-		t.Fatalf("operations guide still contains stale v0.3.5-beta package examples")
+	if strings.Contains(operations, "xui-factor_v0.4.0_linux") {
+		t.Fatalf("operations guide still contains stale v0.4.0 package examples")
 	}
 
 	releaseWorkflow := readRepoFile(t, ".github/workflows/release.yml")
-	for _, want := range []string{"v0.4.0", "docs/releases/v0.4.0.md", "default: false"} {
+	for _, want := range []string{"v0.5.0-beta", "docs/releases/v0.5.0-beta.md", "default: false"} {
 		if !strings.Contains(releaseWorkflow, want) {
 			t.Fatalf("expected release workflow to contain %q", want)
 		}
 	}
-	if strings.Contains(releaseWorkflow, "v0.3.5-beta") {
-		t.Fatalf("release workflow still contains stale v0.3.5-beta examples")
+	if strings.Contains(releaseWorkflow, "v0.4.0") {
+		t.Fatalf("release workflow still contains stale v0.4.0 examples")
 	}
 
-	releaseNotes := readRepoFile(t, "docs/releases/v0.4.0.md")
+	releaseNotes := readRepoFile(t, "docs/releases/v0.5.0-beta.md")
 	for _, want := range []string{
-		"# XuiFactor v0.4.0",
-		"xui-factor_v0.4.0_linux_amd64.tar.gz",
-		"xui-factor_v0.4.0_linux_arm64.tar.gz",
+		"# XuiFactor v0.5.0-beta",
+		"xui-factor_v0.5.0-beta_linux_amd64.tar.gz",
+		"xui-factor_v0.5.0-beta_linux_arm64.tar.gz",
 	} {
 		if !strings.Contains(releaseNotes, want) {
-			t.Fatalf("expected v0.4.0 release notes to contain %q", want)
+			t.Fatalf("expected v0.5.0-beta release notes to contain %q", want)
 		}
 	}
-	for _, stale := range []string{"v0.4.0-beta", "xui-factor_v0.4.0-beta"} {
-		if strings.Contains(releaseNotes, stale) {
-			t.Fatalf("v0.4.0 release notes contain stale beta marker %q", stale)
-		}
+	if strings.Contains(releaseNotes, "xui-factor_v0.5.0_linux") {
+		t.Fatalf("release notes still contain stale stable v0.5.0 package examples")
 	}
 
 	changelog := readRepoFile(t, "CHANGELOG.md")
-	if !strings.Contains(changelog, "## v0.4.0 - Stable") {
-		t.Fatalf("changelog is missing v0.4.0 stable entry")
+	if !strings.Contains(changelog, "## v0.5.0-beta - Unreleased") {
+		t.Fatalf("changelog is missing the v0.5.0-beta entry")
 	}
 }
 

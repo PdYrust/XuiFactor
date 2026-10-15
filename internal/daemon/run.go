@@ -12,7 +12,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		interval = 5 * time.Second
 	}
 
-	fmt.Fprintf(r.out, "run: started interval=%s database=%s\n", interval, r.cfg.DatabasePath)
+	fmt.Fprintf(r.out, "run: started interval=%s database=%s\n", interval, r.cfg.DatabaseLabel())
 	r.runTick(ctx)
 
 	ticker := time.NewTicker(interval)

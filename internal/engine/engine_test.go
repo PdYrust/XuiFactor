@@ -13,24 +13,53 @@ import (
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
-func TestEnableRejectsAmbiguousEmailSelection(t *testing.T) {
+func TestEnableSelectsClientByInboundMembership(t *testing.T) {
 	ctx := context.Background()
+	inboundOne := int64(10)
+	inboundTwo := int64(11)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: 10, email: "same@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: 11, email: "same@example.com", up: 400, down: 500, allTime: 900},
+		{id: 1, inboundID: inboundOne, email: "one@example.com", up: 100, down: 200},
+		{id: 2, inboundID: inboundTwo, email: "two@example.com", up: 400, down: 500},
 	})
 	defer st.Close()
 
-	_, err := svc.Enable(ctx, EnableRequest{Email: "same@example.com", Factor: "1.2"})
-	if err == nil || !strings.Contains(err.Error(), "multiple matches") {
-		t.Fatalf("expected ambiguous match error, got %v", err)
+	_, err := svc.Enable(ctx, EnableRequest{Email: "two@example.com", InboundID: &inboundOne, Factor: "1.2"})
+	if err == nil || !strings.Contains(err.Error(), "no matching record") {
+		t.Fatalf("expected membership miss for inbound 10, got %v", err)
+	}
+	rule, err := svc.Enable(ctx, EnableRequest{Email: "two@example.com", InboundID: &inboundTwo, Factor: "1.2"})
+	if err != nil {
+		t.Fatalf("enable by membership: %v", err)
+	}
+	if rule.InboundID != inboundTwo {
+		t.Fatalf("rule inbound = %d, want requested %d", rule.InboundID, inboundTwo)
+	}
+}
+
+func TestInboundSelectionIgnoresStaleTrafficPointer(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
+	})
+	defer st.Close()
+
+	db := openTestDB(t, dbPath)
+	execEngineTestSQL(t, db, `UPDATE client_traffics SET inbound_id=99 WHERE id=1`)
+	db.Close()
+
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("enable through membership: %v", err)
+	}
+	if _, err := svc.Disable(ctx, RuleSelector{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("disable through membership: %v", err)
 	}
 }
 
 func TestEnableRejectsMissingClient(t *testing.T) {
 	ctx := context.Background()
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: 10, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: 10, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -43,7 +72,7 @@ func TestEnableRejectsMissingClient(t *testing.T) {
 func TestEnableLifecycle(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: 10, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: 10, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -68,17 +97,17 @@ func TestEnableLifecycle(t *testing.T) {
 
 	db := openTestDB(t, dbPath)
 	defer db.Close()
-	var trafficID, lastUp, lastDown, lastAllTime int64
+	var trafficID, lastUp, lastDown int64
 	err = db.QueryRow(`
-		SELECT traffic_id, last_up, last_down, last_all_time
+		SELECT traffic_id, last_up, last_down
 		FROM xui_factor_rule_clients
 		WHERE rule_id=?
-	`, rule.ID).Scan(&trafficID, &lastUp, &lastDown, &lastAllTime)
+	`, rule.ID).Scan(&trafficID, &lastUp, &lastDown)
 	if err != nil {
 		t.Fatalf("read rule client: %v", err)
 	}
-	if trafficID != 1 || lastUp != 100 || lastDown != 200 || lastAllTime != 300 {
-		t.Fatalf("unexpected baseline: traffic=%d up=%d down=%d all_time=%d", trafficID, lastUp, lastDown, lastAllTime)
+	if trafficID != 1 || lastUp != 100 || lastDown != 200 {
+		t.Fatalf("unexpected baseline: traffic=%d up=%d down=%d", trafficID, lastUp, lastDown)
 	}
 }
 
@@ -86,7 +115,7 @@ func TestExcludeLifecycleUsesExactClientIdentity(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -131,39 +160,113 @@ func TestExcludeLifecycleUsesExactClientIdentity(t *testing.T) {
 	}
 }
 
-func TestExcludeSameEmailDifferentTrafficIsDifferentClient(t *testing.T) {
+func TestExcludeUpsertDoesNotDuplicateAcrossPointerDrift(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
+	driftedInbound := int64(99)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
+
+	// A disabled row left behind by an older inbound pointer.
+	db := openTestDB(t, dbPath)
+	execEngineTestSQL(t, db, `
+		INSERT INTO xui_factor_excludes(id, traffic_id, inbound_id, email, state, created_at, updated_at, activated_at)
+		VALUES(1, 1, 55, 'user@example.com', 'disabled', 50, 50, 50)
+	`)
+	execEngineTestSQL(t, db, `
+		INSERT INTO xui_factor_overrides(id, traffic_id, inbound_id, email, factor_ppm, state, created_at, updated_at, activated_at)
+		VALUES(1, 1, 55, 'user@example.com', 1100000, 'disabled', 50, 50, 50)
+	`)
+	db.Close()
 
 	first, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &inboundID})
 	if err != nil {
 		t.Fatalf("first exclude: %v", err)
 	}
-	db := openTestDB(t, dbPath)
-	execEngineTestSQL(t, db, `DELETE FROM client_traffics WHERE id=1`)
-	execEngineTestSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(2, ?, 1, 'user@example.com', 500, 600, 1100, 0, 0, 0, 0)
-	`, inboundID)
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+		t.Fatalf("first override: %v", err)
+	}
+
+	db = openTestDB(t, dbPath)
+	execEngineTestSQL(t, db, `UPDATE client_traffics SET inbound_id=99 WHERE id=1`)
+	execEngineTestSQL(t, db, `DELETE FROM client_inbounds WHERE client_id=1`)
+	execEngineTestSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(1, 99)`)
 	db.Close()
 
-	second, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &inboundID})
+	second, err := svc.Exclude(ctx, ExcludeRequest{Email: "user@example.com", InboundID: &driftedInbound})
 	if err != nil {
 		t.Fatalf("second exclude: %v", err)
 	}
-	if first.ID == second.ID || first.TrafficID == second.TrafficID {
-		t.Fatalf("first=%#v second=%#v, want separate policies", first, second)
+	if first.ID != second.ID {
+		t.Fatalf("duplicate exclude rows created: first=%d second=%d", first.ID, second.ID)
 	}
+	if second.InboundID != driftedInbound {
+		t.Fatalf("exclude inbound = %d, want adopted %d", second.InboundID, driftedInbound)
+	}
+
+	updated, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &driftedInbound, Factor: "2"})
+	if err != nil {
+		t.Fatalf("second override: %v", err)
+	}
+	if updated.InboundID != driftedInbound || updated.FactorPPM != 2_000_000 {
+		t.Fatalf("override = %#v, want re-targeted row with factor 2", updated)
+	}
+
 	policies, err := svc.Excludes(ctx, ExcludeListRequest{})
 	if err != nil {
 		t.Fatalf("list excludes: %v", err)
 	}
-	if len(policies) != 2 {
-		t.Fatalf("policies = %#v, want two active policies", policies)
+	if len(policies) != 1 {
+		t.Fatalf("active excludes = %d, want 1", len(policies))
+	}
+	overrides, err := svc.Overrides(ctx, OverrideListRequest{})
+	if err != nil {
+		t.Fatalf("list overrides: %v", err)
+	}
+	if len(overrides) != 1 {
+		t.Fatalf("active overrides = %d, want 1", len(overrides))
+	}
+
+	if _, err := svc.Unexclude(ctx, ExcludeSelector{Email: "user@example.com", InboundID: &driftedInbound}); err != nil {
+		t.Fatalf("unexclude through membership: %v", err)
+	}
+	if _, err := svc.RemoveOverride(ctx, OverrideSelector{Email: "user@example.com", InboundID: &driftedInbound}); err != nil {
+		t.Fatalf("remove override through membership: %v", err)
+	}
+}
+
+func TestStatusAndReportFollowMembershipNotInboundPointer(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(10)
+	svc, st, dbPath := newTestService(t, []testTraffic{
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
+	})
+	defer st.Close()
+
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	db := openTestDB(t, dbPath)
+	execEngineTestSQL(t, db, `UPDATE client_traffics SET inbound_id=99 WHERE id=1`)
+	db.Close()
+
+	rules, err := svc.Status(ctx, false)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(rules) != 1 || rules[0].EffectiveClientCount != 1 {
+		t.Fatalf("rules = %#v, want one rule with one effective client", rules)
+	}
+
+	report, err := svc.Report(ctx, ReportRequest{InboundID: &inboundID})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	if report.TotalActiveRuleClients != 1 || report.EffectiveFactoredClients != 1 {
+		t.Fatalf("report = active clients %d factored %d, want 1 and 1", report.TotalActiveRuleClients, report.EffectiveFactoredClients)
 	}
 }
 
@@ -171,7 +274,7 @@ func TestOverrideLifecycleUsesExactClientIdentity(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -227,47 +330,11 @@ func TestOverrideLifecycleUsesExactClientIdentity(t *testing.T) {
 	}
 }
 
-func TestOverrideSameEmailDifferentTrafficIsDifferentClient(t *testing.T) {
-	ctx := context.Background()
-	inboundID := int64(10)
-	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
-	})
-	defer st.Close()
-
-	first, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.2"})
-	if err != nil {
-		t.Fatalf("first override: %v", err)
-	}
-	db := openTestDB(t, dbPath)
-	execEngineTestSQL(t, db, `DELETE FROM client_traffics WHERE id=1`)
-	execEngineTestSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(2, ?, 1, 'user@example.com', 500, 600, 1100, 0, 0, 0, 0)
-	`, inboundID)
-	db.Close()
-
-	second, err := svc.Override(ctx, OverrideRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "1.3"})
-	if err != nil {
-		t.Fatalf("second override: %v", err)
-	}
-	if first.ID == second.ID || first.TrafficID == second.TrafficID {
-		t.Fatalf("first=%#v second=%#v, want separate policies", first, second)
-	}
-	policies, err := svc.Overrides(ctx, OverrideListRequest{})
-	if err != nil {
-		t.Fatalf("list overrides: %v", err)
-	}
-	if len(policies) != 2 {
-		t.Fatalf("policies = %#v, want two active policies", policies)
-	}
-}
-
 func TestExplainShowsExcludeWinningOverOverrideAndScope(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -300,7 +367,7 @@ func TestExplainShowsOverrideWinningOverScope(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -327,7 +394,7 @@ func TestExplainShowsScopeWinningWithoutPolicy(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -348,7 +415,7 @@ func TestExplainShowsNoFactorWithoutMatchingMetadata(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -364,25 +431,25 @@ func TestExplainShowsNoFactorWithoutMatchingMetadata(t *testing.T) {
 func TestExplainUsesExactTrafficIdentity(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
+	otherInbound := int64(11)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "same@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: 11, email: "same@example.com", up: 400, down: 500, allTime: 900},
+		{id: 1, inboundID: inboundID, email: "one@example.com", up: 100, down: 200},
+		{id: 2, inboundID: otherInbound, email: "two@example.com", up: 400, down: 500},
 	})
 	defer st.Close()
 
 	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
-	if _, err := svc.Override(ctx, OverrideRequest{Email: "same@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
+	if _, err := svc.Override(ctx, OverrideRequest{Email: "one@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
 		t.Fatalf("override: %v", err)
 	}
 
-	first, err := svc.Explain(ctx, ExplainRequest{Email: "same@example.com", InboundID: &inboundID})
+	first, err := svc.Explain(ctx, ExplainRequest{Email: "one@example.com", InboundID: &inboundID})
 	if err != nil {
 		t.Fatalf("explain first: %v", err)
 	}
-	otherInbound := int64(11)
-	second, err := svc.Explain(ctx, ExplainRequest{Email: "same@example.com", InboundID: &otherInbound})
+	second, err := svc.Explain(ctx, ExplainRequest{Email: "two@example.com", InboundID: &otherInbound})
 	if err != nil {
 		t.Fatalf("explain second: %v", err)
 	}
@@ -398,7 +465,7 @@ func TestExplainIsReadOnly(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -419,7 +486,7 @@ func TestExplainIsReadOnly(t *testing.T) {
 func TestDisableKeepsTrafficCounters(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: 10, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: 10, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -429,7 +496,7 @@ func TestDisableKeepsTrafficCounters(t *testing.T) {
 
 	db := openTestDB(t, dbPath)
 	defer db.Close()
-	execEngineTestSQL(t, db, `UPDATE client_traffics SET up=150, down=250, all_time=400 WHERE id=1`)
+	execEngineTestSQL(t, db, `UPDATE client_traffics SET up=150, down=250 WHERE id=1`)
 
 	rule, err := svc.Disable(ctx, RuleSelector{Email: "user@example.com"})
 	if err != nil {
@@ -439,13 +506,13 @@ func TestDisableKeepsTrafficCounters(t *testing.T) {
 		t.Fatalf("state = %s, want disabled", rule.State)
 	}
 
-	var up, down, allTime int64
-	err = db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=1`).Scan(&up, &down, &allTime)
+	var up, down int64
+	err = db.QueryRow(`SELECT up, down FROM client_traffics WHERE id=1`).Scan(&up, &down)
 	if err != nil {
 		t.Fatalf("read counters: %v", err)
 	}
-	if up != 150 || down != 250 || allTime != 400 {
-		t.Fatalf("disable changed counters: up=%d down=%d all_time=%d", up, down, allTime)
+	if up != 150 || down != 250 {
+		t.Fatalf("disable changed counters: up=%d down=%d", up, down)
 	}
 }
 
@@ -453,7 +520,7 @@ func TestPauseResumeLifecycle(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -471,8 +538,8 @@ func TestPauseResumeLifecycle(t *testing.T) {
 
 	db := openTestDB(t, dbPath)
 	defer db.Close()
-	execEngineTestSQL(t, db, `UPDATE client_traffics SET up=333, down=444, all_time=777 WHERE id=1`)
-	execEngineTestSQL(t, db, `UPDATE xui_factor_rule_clients SET rem_up=9, rem_down=8, rem_all_time=7, missing_since=123 WHERE rule_id=?`, rule.ID)
+	execEngineTestSQL(t, db, `UPDATE client_traffics SET up=333, down=444 WHERE id=1`)
+	execEngineTestSQL(t, db, `UPDATE xui_factor_rule_clients SET rem_up=9, rem_down=8, missing_since=123 WHERE rule_id=?`, rule.ID)
 
 	resumed, err := svc.Resume(ctx, RuleSelector{Email: "user@example.com", InboundID: &inboundID})
 	if err != nil {
@@ -482,20 +549,20 @@ func TestPauseResumeLifecycle(t *testing.T) {
 		t.Fatalf("state = %s, want active", resumed.State)
 	}
 
-	var lastUp, lastDown, lastAllTime, remUp, remDown, remAllTime int64
+	var lastUp, lastDown, remUp, remDown int64
 	var missingSince sql.NullInt64
 	err = db.QueryRow(`
-		SELECT last_up, last_down, last_all_time, rem_up, rem_down, rem_all_time, missing_since
+		SELECT last_up, last_down, rem_up, rem_down, missing_since
 		FROM xui_factor_rule_clients
 		WHERE rule_id=?
-	`, rule.ID).Scan(&lastUp, &lastDown, &lastAllTime, &remUp, &remDown, &remAllTime, &missingSince)
+	`, rule.ID).Scan(&lastUp, &lastDown, &remUp, &remDown, &missingSince)
 	if err != nil {
 		t.Fatalf("read refreshed baseline: %v", err)
 	}
-	if lastUp != 333 || lastDown != 444 || lastAllTime != 777 {
-		t.Fatalf("resume did not refresh baseline: up=%d down=%d all_time=%d", lastUp, lastDown, lastAllTime)
+	if lastUp != 333 || lastDown != 444 {
+		t.Fatalf("resume did not refresh baseline: up=%d down=%d", lastUp, lastDown)
 	}
-	if remUp != 0 || remDown != 0 || remAllTime != 0 || missingSince.Valid {
+	if remUp != 0 || remDown != 0 || missingSince.Valid {
 		t.Fatalf("resume did not clear remainder state")
 	}
 }
@@ -504,7 +571,7 @@ func TestEnableRejectsActiveTrafficConflict(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(10)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
@@ -521,9 +588,9 @@ func TestReportSummarizesActivePoliciesAndEffectiveClients(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "free@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: inboundID, email: "override@example.com", up: 400, down: 500, allTime: 900},
-		{id: 3, inboundID: inboundID, email: "scope@example.com", up: 1000, down: 2000, allTime: 3000},
+		{id: 1, inboundID: inboundID, email: "free@example.com", up: 100, down: 200},
+		{id: 2, inboundID: inboundID, email: "override@example.com", up: 400, down: 500},
+		{id: 3, inboundID: inboundID, email: "scope@example.com", up: 1000, down: 2000},
 	})
 	defer st.Close()
 
@@ -560,8 +627,8 @@ func TestReportInboundFilterAndNoRules(t *testing.T) {
 	inboundOne := int64(1)
 	inboundTwo := int64(2)
 	svc, st, _ := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundOne, email: "one@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: inboundTwo, email: "two@example.com", up: 400, down: 500, allTime: 900},
+		{id: 1, inboundID: inboundOne, email: "one@example.com", up: 100, down: 200},
+		{id: 2, inboundID: inboundTwo, email: "two@example.com", up: 400, down: 500},
 	})
 	defer st.Close()
 
@@ -581,7 +648,7 @@ func TestReportIsReadOnlyAndDoesNotMutateCounters(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 	if _, err := svc.EnableAll(ctx, EnableAllRequest{InboundID: &inboundID, Factor: "2"}); err != nil {
@@ -598,12 +665,12 @@ func TestReportIsReadOnlyAndDoesNotMutateCounters(t *testing.T) {
 	if afterEvents != beforeEvents {
 		t.Fatalf("report created audit events: before=%d after=%d", beforeEvents, afterEvents)
 	}
-	var up, down, allTime int64
-	if err := db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=1`).Scan(&up, &down, &allTime); err != nil {
+	var up, down int64
+	if err := db.QueryRow(`SELECT up, down FROM client_traffics WHERE id=1`).Scan(&up, &down); err != nil {
 		t.Fatalf("read counters: %v", err)
 	}
-	if up != 100 || down != 200 || allTime != 300 {
-		t.Fatalf("report changed counters: up=%d down=%d all_time=%d", up, down, allTime)
+	if up != 100 || down != 200 {
+		t.Fatalf("report changed counters: up=%d down=%d", up, down)
 	}
 }
 
@@ -611,7 +678,7 @@ func TestAuditFiltersAndTrafficImpactAggregation(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	svc, st, dbPath := newTestService(t, []testTraffic{
-		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: inboundID, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 	if _, err := svc.Enable(ctx, EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
@@ -655,7 +722,6 @@ type testTraffic struct {
 	email     string
 	up        int64
 	down      int64
-	allTime   int64
 }
 
 func newTestService(t *testing.T, traffics []testTraffic) (*Service, *store.Store, string) {
@@ -667,9 +733,10 @@ func newTestService(t *testing.T, traffics []testTraffic) (*Service, *store.Stor
 	db := openTestDB(t, dbPath)
 	for _, traffic := range traffics {
 		execEngineTestSQL(t, db, `
-			INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-			VALUES(?, ?, 1, ?, ?, ?, ?, 0, 0, 0, 0)
-		`, traffic.id, traffic.inboundID, traffic.email, traffic.up, traffic.down, traffic.allTime)
+			INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+			VALUES(?, ?, 1, ?, ?, ?, 0, 0, 0, 0)
+		`, traffic.id, traffic.inboundID, traffic.email, traffic.up, traffic.down)
+		insertEngineTestMembership(t, db, traffic.id, traffic.inboundID, traffic.email)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close sqlite: %v", err)
@@ -688,20 +755,33 @@ func newTestService(t *testing.T, traffics []testTraffic) (*Service, *store.Stor
 	return svc, st, dbPath
 }
 
+func insertEngineTestMembership(t *testing.T, db *sql.DB, clientID, inboundID int64, email string) {
+	t.Helper()
+	execEngineTestSQL(t, db, `INSERT INTO clients(id, email) VALUES(?, ?)`, clientID, email)
+	execEngineTestSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(?, ?)`, clientID, inboundID)
+}
+
 func createEngineTestSchema(t *testing.T, dbPath string) {
 	t.Helper()
 	db := openTestDB(t, dbPath)
 	defer db.Close()
 	execEngineTestSQL(t, db, `CREATE TABLE inbounds (id INTEGER PRIMARY KEY)`)
+	execEngineTestSQL(t, db, `CREATE TABLE clients (
+		id INTEGER PRIMARY KEY,
+		email TEXT
+	)`)
+	execEngineTestSQL(t, db, `CREATE TABLE client_inbounds (
+		client_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL
+	)`)
 	execEngineTestSQL(t, db, `
 		CREATE TABLE client_traffics (
 			id INTEGER,
 			inbound_id INTEGER,
 			enable numeric,
-			email TEXT,
+			email TEXT UNIQUE,
 			up INTEGER,
 			down INTEGER,
-			all_time INTEGER,
 			expiry_time INTEGER,
 			total INTEGER,
 			reset INTEGER,

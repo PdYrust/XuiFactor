@@ -23,6 +23,10 @@ import (
 const (
 	appName     = "xui-factor"
 	displayName = "XuiFactor"
+
+	projectCreator    = "YrustPd"
+	projectRepository = "https://github.com/PdYrust/XuiFactor"
+	projectChannel    = "https://t.me/PdYrust"
 )
 
 var (
@@ -55,7 +59,7 @@ func (a *App) Run(args []string) int {
 	}
 
 	if len(args) == 0 {
-		a.printHelp(a.Out)
+		a.printUsage(a.Out)
 		return 0
 	}
 
@@ -117,7 +121,7 @@ func (a *App) Run(args []string) int {
 		return a.runDaemon(ctx, common, args[1:])
 	default:
 		fmt.Fprintf(a.Err, "%s: unknown command %q\n\n", appName, args[0])
-		a.printHelp(a.Err)
+		a.printUsage(a.Err)
 		return 2
 	}
 }
@@ -175,29 +179,46 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
 	out.Section("Doctor")
 	out.Field("config", effectiveConfigPath(opts))
-	out.Field("database", cfg.DatabasePath)
+	out.Field("database", cfg.DatabaseLabel())
+	out.Field("backend", cfg.ResolvedBackend())
 	out.Field("commit", a.Info.Commit)
 	out.Field("built", a.Info.BuildTime)
 
-	dbAccess, err := checkDatabaseFile(cfg.DatabasePath)
-	if err != nil {
-		a.printError(err)
-		return 1
-	}
-	out.Section("Checks")
-	out.Field("database read", "ok")
-	if dbAccess.Writable {
-		out.Field("database write", "ok")
-	} else {
-		out.Field("database write", "warning")
-		warnings = append(warnings, fmt.Sprintf("database write unavailable: %v", dbAccess.WriteError))
-	}
-
 	var st *store.Store
-	if dbAccess.Writable {
-		st, err = store.Open(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	out.Section("Checks")
+	if cfg.ResolvedBackend() == config.BackendPostgres {
+		st, err = store.OpenPostgres(ctx, cfg.DatabaseDSN, cfg.BusyTimeout)
+		if err != nil {
+			a.printError(err)
+			return 1
+		}
+		out.Field("database read", "ok")
+		if err := st.ProbeWrite(ctx); err != nil {
+			out.Field("database write", "warning")
+			warnings = append(warnings, fmt.Sprintf("database write unavailable: %v", err))
+		} else {
+			out.Field("database write", "ok")
+		}
 	} else {
-		st, err = store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+		var dbAccess databaseFileAccess
+		dbAccess, err = checkDatabaseFile(cfg.DatabasePath)
+		if err != nil {
+			a.printError(err)
+			return 1
+		}
+		out.Field("database read", "ok")
+		if dbAccess.Writable {
+			out.Field("database write", "ok")
+		} else {
+			out.Field("database write", "warning")
+			warnings = append(warnings, fmt.Sprintf("database write unavailable: %v", dbAccess.WriteError))
+		}
+
+		if dbAccess.Writable {
+			st, err = store.Open(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+		} else {
+			st, err = store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+		}
 	}
 	if err != nil {
 		a.printError(err)
@@ -527,7 +548,6 @@ func (a *App) runExplain(ctx context.Context, opts commonOptions, args []string)
 		out.Section("Baseline")
 		out.Field("last up", result.Baseline.LastUp)
 		out.Field("last down", result.Baseline.LastDown)
-		out.Field("last all time", result.Baseline.LastAllTime)
 	}
 	if len(result.Decision.Matched) > 0 {
 		out.Section("Matched")
@@ -946,7 +966,7 @@ func (a *App) runReport(ctx context.Context, opts commonOptions, args []string) 
 		a.printError(err)
 		return 1
 	}
-	st, err := store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	st, err := openConfiguredStore(ctx, cfg, true)
 	if err != nil {
 		a.printError(err)
 		return 1
@@ -967,7 +987,7 @@ func (a *App) runReport(ctx context.Context, opts commonOptions, args []string) 
 	out := newOutput(a.Out)
 	out.Title(fmt.Sprintf("%s %s", displayName, a.Info.Version))
 	out.Section("Report")
-	out.Field("database", cfg.DatabasePath)
+	out.Field("database", cfg.DatabaseLabel())
 	if flags.inboundID != nil {
 		out.Field("inbound", *flags.inboundID)
 	}
@@ -1184,6 +1204,7 @@ func (a *App) runReconcile(ctx context.Context, opts commonOptions, args []strin
 	out.Field("disabled clients", result.DisabledClients)
 	out.Field("superseded", result.Superseded)
 	out.Field("conflicts", result.Conflicts)
+	out.Field("policies repaired", result.PoliciesRepaired)
 	return 0
 }
 
@@ -1255,7 +1276,10 @@ func loadConfig(opts commonOptions) (config.Config, error) {
 		return config.Config{}, err
 	}
 	if strings.TrimSpace(opts.databasePath) != "" {
+		// The flag names a SQLite database file, so it selects that backend
+		// even when the config file points at PostgreSQL.
 		cfg.DatabasePath = strings.TrimSpace(opts.databasePath)
+		cfg.DatabaseBackend = config.BackendSQLite
 	}
 	if err := cfg.Validate(); err != nil {
 		return config.Config{}, err
@@ -1416,10 +1440,10 @@ func (a *App) openService(ctx context.Context, opts commonOptions) (*engine.Serv
 	if err != nil {
 		return nil, nil, config.Config{}, err
 	}
-	if err := requireWritableDatabaseFile(cfg.DatabasePath); err != nil {
+	if err := requireWritableDatabase(cfg); err != nil {
 		return nil, nil, config.Config{}, err
 	}
-	st, err := store.Open(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	st, err := openConfiguredStore(ctx, cfg, false)
 	if err != nil {
 		return nil, nil, config.Config{}, err
 	}
@@ -1435,7 +1459,7 @@ func (a *App) openReadOnlyService(ctx context.Context, opts commonOptions) (*eng
 	if err != nil {
 		return nil, nil, err
 	}
-	st, err := store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	st, err := openConfiguredStore(ctx, cfg, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1444,6 +1468,23 @@ func (a *App) openReadOnlyService(ctx context.Context, opts commonOptions) (*eng
 		return nil, nil, err
 	}
 	return engine.New(st), st, nil
+}
+
+func openConfiguredStore(ctx context.Context, cfg config.Config, readOnly bool) (*store.Store, error) {
+	if cfg.ResolvedBackend() == config.BackendPostgres {
+		return store.OpenPostgres(ctx, cfg.DatabaseDSN, cfg.BusyTimeout)
+	}
+	if readOnly {
+		return store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	}
+	return store.Open(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+}
+
+func requireWritableDatabase(cfg config.Config) error {
+	if cfg.ResolvedBackend() == config.BackendPostgres {
+		return nil
+	}
+	return requireWritableDatabaseFile(cfg.DatabasePath)
 }
 
 type enableFlags struct {
@@ -2326,11 +2367,8 @@ func (a *App) ensureWriters() {
 	}
 }
 
-func (a *App) printHelp(w io.Writer) {
-	fmt.Fprintf(w, `%s
-
-Usage:
-  %s [--config PATH] [--database PATH] [command]
+const usageCore = `Usage:
+  xui-factor [--config PATH] [--database PATH] [command]
 
 Commands:
   help       Show this help text
@@ -2364,35 +2402,44 @@ Flags:
   -h, --help      Show this help text
   -v, --version   Print version metadata
   --config PATH   Load JSON config from PATH
-  --database PATH Override configured SQLite database path
+  --database PATH Override configured SQLite database path`
 
-Examples:
-  %s enable --email user@example.com --factor 1.2
-  %s enable-all --factor 1.2
-  %s enable-all --factor 1.2 --limited-only
-  %s enable-all --factor 1.2 --once
-  %s explain --email user@example.com --inbound-id 1
-  %s status --effective
-  %s status --clients --inbound-id 1
-  %s exclude --email user@example.com --inbound-id 1
-  %s excludes
-  %s override --email user@example.com --inbound-id 1 --factor 1.2
-  %s overrides
-  %s report
-  %s report --inbound-id 1
-  %s audit --event traffic_applied --limit 20
-  %s audit --since 24h
-  %s disable --email user@example.com
-  %s disable-all
-  %s backup
-  %s cleanup --dry-run
-  %s reconcile --dry-run
-  %s doctor
-  %s tick
-  %s run
-`, displayName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+const helpExamples = `  xui-factor enable --email user@example.com --factor 1.2
+  xui-factor enable-all --factor 1.2
+  xui-factor enable-all --factor 1.2 --limited-only
+  xui-factor enable-all --factor 1.2 --once
+  xui-factor explain --email user@example.com --inbound-id 1
+  xui-factor status --effective
+  xui-factor status --clients --inbound-id 1
+  xui-factor exclude --email user@example.com --inbound-id 1
+  xui-factor excludes
+  xui-factor override --email user@example.com --inbound-id 1 --factor 1.2
+  xui-factor overrides
+  xui-factor report
+  xui-factor report --inbound-id 1
+  xui-factor audit --event traffic_applied --limit 20
+  xui-factor audit --since 24h
+  xui-factor disable --email user@example.com
+  xui-factor disable-all
+  xui-factor backup
+  xui-factor cleanup --dry-run
+  xui-factor reconcile --dry-run
+  xui-factor doctor
+  xui-factor tick
+  xui-factor run`
+
+// printUsage writes the short reference shown for bare invocations and
+// command errors; command examples live in the full help only.
+func (a *App) printUsage(w io.Writer) {
+	fmt.Fprintf(w, "%s\n\n%s\n\nRun \"%s --help\" for command examples.\n", displayName, usageCore, appName)
+}
+
+func (a *App) printHelp(w io.Writer) {
+	fmt.Fprintf(w, "%s\n\n%s\n\nExamples:\n%s\n\nProject:\n  creator: %s\n  repository: %s\n  channel: %s\n",
+		displayName, usageCore, helpExamples, projectCreator, projectRepository, projectChannel)
 }
 
 func (a *App) printVersion(w io.Writer) {
-	fmt.Fprintf(w, "%s %s\ncommit: %s\nbuilt: %s\n", displayName, a.Info.Version, a.Info.Commit, a.Info.BuildTime)
+	fmt.Fprintf(w, "%s %s\ncommit: %s\nbuilt: %s\nrepository: %s\nchannel: %s\n",
+		displayName, a.Info.Version, a.Info.Commit, a.Info.BuildTime, projectRepository, projectChannel)
 }

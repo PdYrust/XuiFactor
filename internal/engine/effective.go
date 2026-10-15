@@ -227,7 +227,7 @@ func decideLoadedClient(client store.ClientTraffic, targets []store.ActiveRuleCl
 func validTargetsForClient(client store.ClientTraffic, targets []store.ActiveRuleClient) []store.ActiveRuleClient {
 	valid := make([]store.ActiveRuleClient, 0, 2)
 	for _, target := range targets {
-		if target.Client.TrafficID != client.ID || target.Client.InboundID != client.InboundID || target.Client.Email != client.Email {
+		if target.Client.TrafficID != client.ID || target.Client.Email != client.Email {
 			continue
 		}
 		if target.Client.MissingAt != nil {

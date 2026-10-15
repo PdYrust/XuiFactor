@@ -62,7 +62,7 @@ func (s *Service) Override(ctx context.Context, req OverrideRequest) (store.Over
 		if err != nil {
 			return err
 		}
-		if _, err := tx.RefreshActiveRuleClientBaselinesForTraffic(ctx, client.ID, client.InboundID, client.Email, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if _, err := tx.RefreshActiveRuleClientBaselinesForTraffic(ctx, client.ID, client.Email, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
 		eventType := store.EventOverrideEnable
@@ -93,21 +93,25 @@ func (s *Service) RemoveOverride(ctx context.Context, selector OverrideSelector)
 		if err != nil {
 			return describeSelectorError("find client", err)
 		}
-		policy, err = tx.FindActiveOverrideForClient(ctx, client.ID, client.InboundID, client.Email)
+		policy, err = tx.FindActiveOverrideForClient(ctx, client.ID, client.Email)
+		if errors.Is(err, store.ErrNotFound) {
+			// The stored row may still point at a replaced traffic row.
+			policy, err = tx.FindActiveOverrideByEmail(ctx, client.Email)
+		}
 		if err != nil {
 			return describeSelectorError("find override policy", err)
 		}
 		if err := tx.DisableOverride(ctx, policy.ID, now); err != nil {
 			return err
 		}
-		if _, err := tx.RefreshActiveRuleClientBaselinesForTraffic(ctx, client.ID, client.InboundID, client.Email, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if _, err := tx.RefreshActiveRuleClientBaselinesForTraffic(ctx, client.ID, client.Email, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
 		message := fmt.Sprintf("override policy %d disabled for traffic id %d inbound %d email %s", policy.ID, policy.TrafficID, policy.InboundID, policy.Email)
 		if err := tx.AddEvent(ctx, nil, store.EventOverrideDisable, message, now); err != nil {
 			return err
 		}
-		policy, err = tx.FindOverrideByIdentity(ctx, client.ID, client.InboundID, client.Email)
+		policy, err = tx.FindOverrideByID(ctx, policy.ID)
 		return err
 	})
 	return policy, err

@@ -79,7 +79,7 @@ func ActiveRuleCandidates(targets []store.ActiveRuleClient) []Candidate {
 func ClientCandidates(client store.ClientTraffic, targets []store.ActiveRuleClient, excludes []store.ExcludePolicy, overrides []store.OverridePolicy) []Candidate {
 	matchingTargets := make([]store.ActiveRuleClient, 0, 2)
 	for _, target := range targets {
-		if target.Client.TrafficID == client.ID && target.Client.InboundID == client.InboundID && target.Client.Email == client.Email {
+		if target.Client.TrafficID == client.ID && target.Client.Email == client.Email {
 			matchingTargets = append(matchingTargets, target)
 		}
 	}
@@ -92,7 +92,7 @@ func ClientCandidates(client store.ClientTraffic, targets []store.ActiveRuleClie
 
 	if len(excludeCandidates) == 0 {
 		for _, exclude := range excludes {
-			if exactPolicyMatch(client, exclude.TrafficID, exclude.InboundID, exclude.Email) {
+			if exactPolicyMatch(client, exclude.TrafficID, exclude.Email) {
 				candidates = append(candidates, Candidate{
 					SourceType: SourceExclude,
 					RuleID:     exclude.ID,
@@ -108,7 +108,7 @@ func ClientCandidates(client store.ClientTraffic, targets []store.ActiveRuleClie
 	}
 	if len(overrideCandidates) == 0 {
 		for _, override := range overrides {
-			if exactPolicyMatch(client, override.TrafficID, override.InboundID, override.Email) {
+			if exactPolicyMatch(client, override.TrafficID, override.Email) {
 				candidates = append(candidates, Candidate{
 					SourceType: SourceUserOverride,
 					RuleID:     override.ID,
@@ -146,14 +146,12 @@ func DecideActiveRuleClients(targets []store.ActiveRuleClient) ([]Decision, erro
 func ExcludeCandidatesForActiveTargets(excludes []store.ExcludePolicy, targets []store.ActiveRuleClient) []Candidate {
 	type targetKey struct {
 		trafficID int64
-		inboundID int64
 		email     string
 	}
 	targetKeys := make(map[targetKey]struct{}, len(targets))
 	for _, target := range targets {
 		targetKeys[targetKey{
 			trafficID: target.Client.TrafficID,
-			inboundID: target.Client.InboundID,
 			email:     target.Client.Email,
 		}] = struct{}{}
 	}
@@ -162,7 +160,6 @@ func ExcludeCandidatesForActiveTargets(excludes []store.ExcludePolicy, targets [
 	for _, exclude := range excludes {
 		key := targetKey{
 			trafficID: exclude.TrafficID,
-			inboundID: exclude.InboundID,
 			email:     exclude.Email,
 		}
 		if _, ok := targetKeys[key]; !ok {
@@ -184,14 +181,12 @@ func ExcludeCandidatesForActiveTargets(excludes []store.ExcludePolicy, targets [
 func OverrideCandidatesForActiveTargets(overrides []store.OverridePolicy, targets []store.ActiveRuleClient) []Candidate {
 	type targetKey struct {
 		trafficID int64
-		inboundID int64
 		email     string
 	}
 	targetsByKey := make(map[targetKey]store.ActiveRuleClient, len(targets))
 	for _, target := range targets {
 		targetsByKey[targetKey{
 			trafficID: target.Client.TrafficID,
-			inboundID: target.Client.InboundID,
 			email:     target.Client.Email,
 		}] = target
 	}
@@ -200,7 +195,6 @@ func OverrideCandidatesForActiveTargets(overrides []store.OverridePolicy, target
 	for _, override := range overrides {
 		key := targetKey{
 			trafficID: override.TrafficID,
-			inboundID: override.InboundID,
 			email:     override.Email,
 		}
 		target, ok := targetsByKey[key]
@@ -222,8 +216,8 @@ func OverrideCandidatesForActiveTargets(overrides []store.OverridePolicy, target
 	return candidates
 }
 
-func exactPolicyMatch(client store.ClientTraffic, trafficID, inboundID int64, email string) bool {
-	return client.ID == trafficID && client.InboundID == inboundID && client.Email == email
+func exactPolicyMatch(client store.ClientTraffic, trafficID int64, email string) bool {
+	return client.ID == trafficID && client.Email == email
 }
 
 func Decide(candidates []Candidate) ([]Decision, error) {

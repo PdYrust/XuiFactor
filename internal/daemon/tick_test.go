@@ -18,13 +18,13 @@ import (
 
 func TestTickAppliesFactorFive(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -33,20 +33,20 @@ func TestTickAppliesFactorFive(t *testing.T) {
 	if result.Applied != 1 {
 		t.Fatalf("applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 1, 150, 300, 450)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 150, lastDown: 300, lastAllTime: 450})
+	assertCounters(t, h.dbPath, 1, 150, 300)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 150, lastDown: 300})
 }
 
 func TestTickAppliesFactorOnePointTwoWithRemainders(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "1.2"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	setCounters(t, h.dbPath, 1, 103, 204, 307)
+	setCounters(t, h.dbPath, 1, 103, 204)
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("first tick: %v", err)
@@ -54,16 +54,15 @@ func TestTickAppliesFactorOnePointTwoWithRemainders(t *testing.T) {
 	if result.Baselined != 1 || result.Applied != 0 {
 		t.Fatalf("first result = %#v, want one baseline and no apply", result)
 	}
-	assertCounters(t, h.dbPath, 1, 103, 204, 307)
+	assertCounters(t, h.dbPath, 1, 103, 204)
 	assertRuleClient(t, h.dbPath, 1, ruleClientState{
-		lastUp:      103,
-		lastDown:    204,
-		lastAllTime: 307,
-		remUp:       600000,
-		remDown:     800000,
+		lastUp:   103,
+		lastDown: 204,
+		remUp:    600000,
+		remDown:  800000,
 	})
 
-	setCounters(t, h.dbPath, 1, 105, 205, 310)
+	setCounters(t, h.dbPath, 1, 105, 205)
 	result, err = h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -71,19 +70,19 @@ func TestTickAppliesFactorOnePointTwoWithRemainders(t *testing.T) {
 	if result.Applied != 1 {
 		t.Fatalf("second applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 1, 106, 206, 312)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 106, lastDown: 206, lastAllTime: 312})
+	assertCounters(t, h.dbPath, 1, 106, 206)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 106, lastDown: 206})
 }
 
 func TestTickFactorOneOnlyUpdatesBaseline(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "1"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 125, 230, 355)
+	setCounters(t, h.dbPath, 1, 125, 230)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -92,13 +91,13 @@ func TestTickFactorOneOnlyUpdatesBaseline(t *testing.T) {
 	if result.Baselined != 1 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want one baseline and no apply", result)
 	}
-	assertCounters(t, h.dbPath, 1, 125, 230, 355)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 125, lastDown: 230, lastAllTime: 355})
+	assertCounters(t, h.dbPath, 1, 125, 230)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 125, lastDown: 230})
 }
 
 func TestDisabledRulesDoNotMutateCounters(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
@@ -107,7 +106,7 @@ func TestDisabledRulesDoNotMutateCounters(t *testing.T) {
 	if _, err := h.engine.Disable(ctx, engine.RuleSelector{Email: "user@example.com"}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -116,12 +115,12 @@ func TestDisabledRulesDoNotMutateCounters(t *testing.T) {
 	if result.ActiveClients != 0 {
 		t.Fatalf("active clients = %d, want 0", result.ActiveClients)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertCounters(t, h.dbPath, 1, 110, 220)
 }
 
 func TestPausedRulesDoNotMutateCounters(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
@@ -130,7 +129,7 @@ func TestPausedRulesDoNotMutateCounters(t *testing.T) {
 	if _, err := h.engine.Pause(ctx, engine.RuleSelector{Email: "user@example.com"}); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -139,43 +138,43 @@ func TestPausedRulesDoNotMutateCounters(t *testing.T) {
 	if result.ActiveClients != 0 {
 		t.Fatalf("active clients = %d, want 0", result.ActiveClients)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertCounters(t, h.dbPath, 1, 110, 220)
 }
 
 func TestDisableKeepsPreviouslyMultipliedResults(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 	if _, err := h.runner.Tick(ctx); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 150, 300, 450)
+	assertCounters(t, h.dbPath, 1, 150, 300)
 
 	if _, err := h.engine.Disable(ctx, engine.RuleSelector{Email: "user@example.com"}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 160, 320, 480)
+	setCounters(t, h.dbPath, 1, 160, 320)
 	if _, err := h.runner.Tick(ctx); err != nil {
 		t.Fatalf("tick after disable: %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 160, 320, 480)
+	assertCounters(t, h.dbPath, 1, 160, 320)
 }
 
 func TestCounterDecreaseRebaselinesWithoutMultiplierWrite(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	setRuleClientRemainders(t, h.dbPath, 1, 123, 456, 789)
-	setCounters(t, h.dbPath, 1, 90, 210, 300)
+	setRuleClientRemainders(t, h.dbPath, 1, 123, 456)
+	setCounters(t, h.dbPath, 1, 90, 210)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -184,8 +183,8 @@ func TestCounterDecreaseRebaselinesWithoutMultiplierWrite(t *testing.T) {
 	if result.Rebaselined != 1 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want one rebaseline and no apply", result)
 	}
-	assertCounters(t, h.dbPath, 1, 90, 210, 300)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 90, lastDown: 210, lastAllTime: 300})
+	assertCounters(t, h.dbPath, 1, 90, 210)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 90, lastDown: 210})
 	if got := countEvents(t, h.dbPath, store.EventClientReset); got != 1 {
 		t.Fatalf("reset events = %d, want 1", got)
 	}
@@ -193,7 +192,7 @@ func TestCounterDecreaseRebaselinesWithoutMultiplierWrite(t *testing.T) {
 
 func TestMissingClientRowIsMarkedAndSkipped(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
@@ -218,32 +217,32 @@ func TestMissingClientRowIsMarkedAndSkipped(t *testing.T) {
 
 func TestDuplicateActiveTargetsFailSafely(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 	insertDuplicateActiveTarget(t, h.dbPath)
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	_, err := h.runner.Tick(ctx)
 	if !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("expected conflict, got %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertCounters(t, h.dbPath, 1, 110, 220)
 }
 
 func TestPersistentScopeAutoEnrollsNewClientOnTick(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -252,8 +251,8 @@ func TestPersistentScopeAutoEnrollsNewClientOnTick(t *testing.T) {
 	if result.Enrolled != 1 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want one enrollment and no apply", result)
 	}
-	assertCounters(t, h.dbPath, 2, 1000, 2000, 3000)
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000, lastAllTime: 3000})
+	assertCounters(t, h.dbPath, 2, 1000, 2000)
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000})
 	if !ruleClientExistsForRule(t, h.dbPath, ruleID, 2) {
 		t.Fatalf("expected scope rule client for traffic 2")
 	}
@@ -261,7 +260,7 @@ func TestPersistentScopeAutoEnrollsNewClientOnTick(t *testing.T) {
 		t.Fatalf("scope enroll events = %d, want 1", got)
 	}
 
-	setCounters(t, h.dbPath, 2, 1010, 2020, 3030)
+	setCounters(t, h.dbPath, 2, 1010, 2020)
 	result, err = h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -269,20 +268,20 @@ func TestPersistentScopeAutoEnrollsNewClientOnTick(t *testing.T) {
 	if result.Applied != 1 {
 		t.Fatalf("applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 2, 1020, 2040, 3060)
+	assertCounters(t, h.dbPath, 2, 1020, 2040)
 }
 
 func TestInboundScopeDoesNotEnrollDifferentInbound(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 2, 1, "second@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 2, 1, "second@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -300,8 +299,8 @@ func TestExcludedClientReceivesNoFactorWhenInboundScopeMatches(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	h := newTickHarness(t, []testTraffic{
-		{id: 1, inboundID: 1, email: "excluded@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: 1, email: "active@example.com", up: 400, down: 500, allTime: 900},
+		{id: 1, inboundID: 1, email: "excluded@example.com", up: 100, down: 200},
+		{id: 2, inboundID: 1, email: "active@example.com", up: 400, down: 500},
 	})
 	defer h.store.Close()
 
@@ -311,8 +310,8 @@ func TestExcludedClientReceivesNoFactorWhenInboundScopeMatches(t *testing.T) {
 	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "excluded@example.com", InboundID: &inboundID}); err != nil {
 		t.Fatalf("exclude: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
-	setCounters(t, h.dbPath, 2, 410, 520, 930)
+	setCounters(t, h.dbPath, 1, 110, 220)
+	setCounters(t, h.dbPath, 2, 410, 520)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -321,16 +320,16 @@ func TestExcludedClientReceivesNoFactorWhenInboundScopeMatches(t *testing.T) {
 	if result.ActiveClients != 1 || result.Applied != 1 {
 		t.Fatalf("result = %#v, want one effective applied client", result)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	assertCounters(t, h.dbPath, 2, 420, 540, 960)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 420, lastDown: 540, lastAllTime: 960})
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	assertCounters(t, h.dbPath, 2, 420, 540)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220})
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 420, lastDown: 540})
 }
 
 func TestExcludedClientReceivesNoFactorWhenGlobalScopeMatches(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "excluded@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "excluded@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
@@ -339,7 +338,7 @@ func TestExcludedClientReceivesNoFactorWhenGlobalScopeMatches(t *testing.T) {
 	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "excluded@example.com", InboundID: &inboundID}); err != nil {
 		t.Fatalf("exclude: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -348,14 +347,14 @@ func TestExcludedClientReceivesNoFactorWhenGlobalScopeMatches(t *testing.T) {
 	if result.ActiveClients != 0 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want no effective factor clients", result)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220})
 }
 
 func TestUnexcludeResumesFromCurrentBaselineWithoutRetroactiveFactor(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
@@ -364,17 +363,17 @@ func TestUnexcludeResumesFromCurrentBaselineWithoutRetroactiveFactor(t *testing.
 	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "user@example.com", InboundID: &inboundID}); err != nil {
 		t.Fatalf("exclude: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 	if _, err := h.runner.Tick(ctx); err != nil {
 		t.Fatalf("excluded tick: %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220})
 
 	if _, err := h.engine.Unexclude(ctx, engine.ExcludeSelector{Email: "user@example.com", InboundID: &inboundID}); err != nil {
 		t.Fatalf("unexclude: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 120, 240, 360)
+	setCounters(t, h.dbPath, 1, 120, 240)
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("tick after unexclude: %v", err)
@@ -382,16 +381,16 @@ func TestUnexcludeResumesFromCurrentBaselineWithoutRetroactiveFactor(t *testing.
 	if result.Applied != 1 {
 		t.Fatalf("applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 1, 130, 260, 390)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 130, lastDown: 260, lastAllTime: 390})
+	assertCounters(t, h.dbPath, 1, 130, 260)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 130, lastDown: 260})
 }
 
 func TestOverrideClientUsesOverrideFactorWhenInboundScopeMatches(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	h := newTickHarness(t, []testTraffic{
-		{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: 1, email: "scope@example.com", up: 400, down: 500, allTime: 900},
+		{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200},
+		{id: 2, inboundID: 1, email: "scope@example.com", up: 400, down: 500},
 	})
 	defer h.store.Close()
 
@@ -408,8 +407,8 @@ func TestOverrideClientUsesOverrideFactorWhenInboundScopeMatches(t *testing.T) {
 	if explain.Decision.SourceType != policy.SourceUserOverride || explain.Decision.FactorPPM != 1_200_000 {
 		t.Fatalf("explain decision = %#v, want override before tick", explain.Decision)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
-	setCounters(t, h.dbPath, 2, 410, 520, 930)
+	setCounters(t, h.dbPath, 1, 110, 220)
+	setCounters(t, h.dbPath, 2, 410, 520)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -418,16 +417,16 @@ func TestOverrideClientUsesOverrideFactorWhenInboundScopeMatches(t *testing.T) {
 	if result.ActiveClients != 2 || result.Applied != 2 {
 		t.Fatalf("result = %#v, want two effective applied clients", result)
 	}
-	assertCounters(t, h.dbPath, 1, 112, 224, 336)
-	assertCounters(t, h.dbPath, 2, 420, 540, 960)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 112, lastDown: 224, lastAllTime: 336})
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 420, lastDown: 540, lastAllTime: 960})
+	assertCounters(t, h.dbPath, 1, 112, 224)
+	assertCounters(t, h.dbPath, 2, 420, 540)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 112, lastDown: 224})
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 420, lastDown: 540})
 }
 
 func TestOverrideClientUsesOverrideFactorWhenGlobalScopeMatches(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
@@ -436,7 +435,7 @@ func TestOverrideClientUsesOverrideFactorWhenGlobalScopeMatches(t *testing.T) {
 	if _, err := h.engine.Override(ctx, engine.OverrideRequest{Email: "override@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
 		t.Fatalf("override: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -445,13 +444,13 @@ func TestOverrideClientUsesOverrideFactorWhenGlobalScopeMatches(t *testing.T) {
 	if result.ActiveClients != 1 || result.Applied != 1 {
 		t.Fatalf("result = %#v, want one override-applied client", result)
 	}
-	assertCounters(t, h.dbPath, 1, 112, 224, 336)
+	assertCounters(t, h.dbPath, 1, 112, 224)
 }
 
 func TestExcludeWinsOverOverride(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "policy@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "policy@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
@@ -463,7 +462,7 @@ func TestExcludeWinsOverOverride(t *testing.T) {
 	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "policy@example.com", InboundID: &inboundID}); err != nil {
 		t.Fatalf("exclude: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -472,14 +471,14 @@ func TestExcludeWinsOverOverride(t *testing.T) {
 	if result.ActiveClients != 0 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want exclude to suppress override and scope", result)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220, lastAllTime: 330})
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 110, lastDown: 220})
 }
 
 func TestUpdatingOverrideRefreshesBaselineWithoutRetroactiveFactor(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
@@ -488,11 +487,11 @@ func TestUpdatingOverrideRefreshesBaselineWithoutRetroactiveFactor(t *testing.T)
 	if _, err := h.engine.Override(ctx, engine.OverrideRequest{Email: "override@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
 		t.Fatalf("override: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 	if _, err := h.engine.Override(ctx, engine.OverrideRequest{Email: "override@example.com", InboundID: &inboundID, Factor: "1.5"}); err != nil {
 		t.Fatalf("update override: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 120, 240, 360)
+	setCounters(t, h.dbPath, 1, 120, 240)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -501,14 +500,14 @@ func TestUpdatingOverrideRefreshesBaselineWithoutRetroactiveFactor(t *testing.T)
 	if result.Applied != 1 {
 		t.Fatalf("applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 1, 125, 250, 375)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 125, lastDown: 250, lastAllTime: 375})
+	assertCounters(t, h.dbPath, 1, 125, 250)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 125, lastDown: 250})
 }
 
 func TestRemoveOverrideResumesScopeFromCurrentBaseline(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "override@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
@@ -517,17 +516,17 @@ func TestRemoveOverrideResumesScopeFromCurrentBaseline(t *testing.T) {
 	if _, err := h.engine.Override(ctx, engine.OverrideRequest{Email: "override@example.com", InboundID: &inboundID, Factor: "1.2"}); err != nil {
 		t.Fatalf("override: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 	if _, err := h.runner.Tick(ctx); err != nil {
 		t.Fatalf("override tick: %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 112, 224, 336)
+	assertCounters(t, h.dbPath, 1, 112, 224)
 
-	setCounters(t, h.dbPath, 1, 120, 240, 360)
+	setCounters(t, h.dbPath, 1, 120, 240)
 	if _, err := h.engine.RemoveOverride(ctx, engine.OverrideSelector{Email: "override@example.com", InboundID: &inboundID}); err != nil {
 		t.Fatalf("remove override: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 130, 260, 390)
+	setCounters(t, h.dbPath, 1, 130, 260)
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("tick after remove override: %v", err)
@@ -535,13 +534,13 @@ func TestRemoveOverrideResumesScopeFromCurrentBaseline(t *testing.T) {
 	if result.Applied != 1 {
 		t.Fatalf("applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 1, 140, 280, 420)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 140, lastDown: 280, lastAllTime: 420})
+	assertCounters(t, h.dbPath, 1, 140, 280)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 140, lastDown: 280})
 }
 
 func TestLimitedOnlyScopeExcludesFutureUnlimitedClients(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "limited@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "limited@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 	setTickTotal(t, h.dbPath, 1, 100)
 
@@ -549,7 +548,7 @@ func TestLimitedOnlyScopeExcludesFutureUnlimitedClients(t *testing.T) {
 		t.Fatalf("enable all: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "unlimited@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "unlimited@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -565,14 +564,14 @@ func TestLimitedOnlyScopeExcludesFutureUnlimitedClients(t *testing.T) {
 
 func TestIncludeDisabledScopeEnrollsFutureDisabledClients(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "enabled@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "enabled@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", IncludeDisabledClients: true}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 1, 0, "disabled@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 0, "disabled@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -588,14 +587,14 @@ func TestIncludeDisabledScopeEnrollsFutureDisabledClients(t *testing.T) {
 
 func TestSnapshotScopeDoesNotAutoEnrollFutureClients(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", Once: true}); err != nil {
 		t.Fatalf("enable all once: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -611,7 +610,7 @@ func TestSnapshotScopeDoesNotAutoEnrollFutureClients(t *testing.T) {
 
 func TestDisableAllStopsFutureScopeEnrollment(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
@@ -621,7 +620,7 @@ func TestDisableAllStopsFutureScopeEnrollment(t *testing.T) {
 	if _, err := h.engine.DisableAll(ctx, engine.BulkSelector{}); err != nil {
 		t.Fatalf("disable all: %v", err)
 	}
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -637,7 +636,7 @@ func TestDisableAllStopsFutureScopeEnrollment(t *testing.T) {
 
 func TestPauseAllStopsFutureScopeEnrollment(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
@@ -647,7 +646,7 @@ func TestPauseAllStopsFutureScopeEnrollment(t *testing.T) {
 	if _, err := h.engine.PauseAll(ctx, engine.BulkSelector{}); err != nil {
 		t.Fatalf("pause all: %v", err)
 	}
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -663,7 +662,7 @@ func TestPauseAllStopsFutureScopeEnrollment(t *testing.T) {
 
 func TestResumeAllRefreshesScopeBaselinesAndEnrollment(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
@@ -673,8 +672,8 @@ func TestResumeAllRefreshesScopeBaselinesAndEnrollment(t *testing.T) {
 	if _, err := h.engine.PauseAll(ctx, engine.BulkSelector{}); err != nil {
 		t.Fatalf("pause all: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 500, 600, 1100)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 3000, 0)
+	setCounters(t, h.dbPath, 1, 500, 600)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "second@example.com", 1000, 2000, 0)
 	if result, err := h.runner.Tick(ctx); err != nil {
 		t.Fatalf("paused tick: %v", err)
 	} else if result.Enrolled != 0 {
@@ -688,7 +687,7 @@ func TestResumeAllRefreshesScopeBaselinesAndEnrollment(t *testing.T) {
 	if result.Changed != 1 {
 		t.Fatalf("resume result = %#v, want changed 1", result)
 	}
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 500, lastDown: 600, lastAllTime: 1100})
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 500, lastDown: 600})
 
 	tickResult, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -700,18 +699,18 @@ func TestResumeAllRefreshesScopeBaselinesAndEnrollment(t *testing.T) {
 	if !ruleClientExistsForRule(t, h.dbPath, ruleID, 2) {
 		t.Fatalf("resumed scope did not enroll future client")
 	}
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000, lastAllTime: 3000})
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000})
 }
 
 func TestAutoEnrolledClientDoesNotApplyOldTrafficRetroactively(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "5"}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "late@example.com", 900, 1000, 1900, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "late@example.com", 900, 1000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -720,19 +719,19 @@ func TestAutoEnrolledClientDoesNotApplyOldTrafficRetroactively(t *testing.T) {
 	if result.Enrolled != 1 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want one enrollment and no apply", result)
 	}
-	assertCounters(t, h.dbPath, 2, 900, 1000, 1900)
+	assertCounters(t, h.dbPath, 2, 900, 1000)
 }
 
 func TestScopeAutoEnrollConflictIsSkippedSafely(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2"}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "conflict@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "conflict@example.com", 1000, 2000, 0)
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "conflict@example.com", Factor: "3"}); err != nil {
 		t.Fatalf("enable single conflict target: %v", err)
 	}
@@ -750,13 +749,13 @@ func TestScopeAutoEnrollConflictIsSkippedSafely(t *testing.T) {
 	if got := countEvents(t, h.dbPath, store.EventScopeSkip); got != 1 {
 		t.Fatalf("scope skip events = %d, want 1", got)
 	}
-	assertCounters(t, h.dbPath, 2, 1000, 2000, 3000)
+	assertCounters(t, h.dbPath, 2, 1000, 2000)
 }
 
 func TestConsolidatedClientDoesNotDoubleApplyOnNextTick(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
@@ -765,7 +764,7 @@ func TestConsolidatedClientDoesNotDoubleApplyOnNextTick(t *testing.T) {
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
 		t.Fatalf("enable all consolidate: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -774,7 +773,7 @@ func TestConsolidatedClientDoesNotDoubleApplyOnNextTick(t *testing.T) {
 	if result.Applied != 1 {
 		t.Fatalf("applied = %d, want 1", result.Applied)
 	}
-	assertCounters(t, h.dbPath, 1, 120, 240, 360)
+	assertCounters(t, h.dbPath, 1, 120, 240)
 	if got := countActiveTargetsForTraffic(t, h.dbPath, 1); got != 1 {
 		t.Fatalf("active targets = %d, want 1", got)
 	}
@@ -783,7 +782,7 @@ func TestConsolidatedClientDoesNotDoubleApplyOnNextTick(t *testing.T) {
 func TestPersistentAutoEnrollWorksAfterConsolidation(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
@@ -793,7 +792,7 @@ func TestPersistentAutoEnrollWorksAfterConsolidation(t *testing.T) {
 		t.Fatalf("enable all consolidate: %v", err)
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "future@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "future@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -805,13 +804,13 @@ func TestPersistentAutoEnrollWorksAfterConsolidation(t *testing.T) {
 	if !ruleClientExistsForRule(t, h.dbPath, ruleID, 2) {
 		t.Fatalf("future client was not enrolled into consolidated scope")
 	}
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000, lastAllTime: 3000})
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000})
 }
 
 func TestInboundScopeEffectiveDecisionWinsOverGlobalScope(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "5"}); err != nil {
@@ -823,7 +822,7 @@ func TestInboundScopeEffectiveDecisionWinsOverGlobalScope(t *testing.T) {
 	}
 	inboundRuleID := scopeRuleIDForInbound(t, h.dbPath, inboundID)
 	insertScopeRuleClient(t, h.dbPath, inboundRuleID, 1)
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -832,14 +831,14 @@ func TestInboundScopeEffectiveDecisionWinsOverGlobalScope(t *testing.T) {
 	if result.ActiveClients != 1 || result.Applied != 1 {
 		t.Fatalf("result = %#v, want one effective applied client", result)
 	}
-	assertCounters(t, h.dbPath, 1, 120, 240, 360)
-	assertRuleClientForRule(t, h.dbPath, inboundRuleID, 1, ruleClientState{lastUp: 120, lastDown: 240, lastAllTime: 360})
-	assertRuleClientForRule(t, h.dbPath, globalRuleID, 1, ruleClientState{lastUp: 120, lastDown: 240, lastAllTime: 360})
+	assertCounters(t, h.dbPath, 1, 120, 240)
+	assertRuleClientForRule(t, h.dbPath, inboundRuleID, 1, ruleClientState{lastUp: 120, lastDown: 240})
+	assertRuleClientForRule(t, h.dbPath, globalRuleID, 1, ruleClientState{lastUp: 120, lastDown: 240})
 
 	db := openTickDB(t, h.dbPath)
 	execTickSQL(t, db, `UPDATE xui_factor_rules SET state='disabled' WHERE id=?`, inboundRuleID)
 	db.Close()
-	setCounters(t, h.dbPath, 1, 130, 260, 390)
+	setCounters(t, h.dbPath, 1, 130, 260)
 
 	result, err = h.runner.Tick(ctx)
 	if err != nil {
@@ -848,13 +847,13 @@ func TestInboundScopeEffectiveDecisionWinsOverGlobalScope(t *testing.T) {
 	if result.ActiveClients != 1 || result.Applied != 1 {
 		t.Fatalf("second result = %#v, want one global applied client", result)
 	}
-	assertCounters(t, h.dbPath, 1, 170, 340, 510)
-	assertRuleClientForRule(t, h.dbPath, globalRuleID, 1, ruleClientState{lastUp: 170, lastDown: 340, lastAllTime: 510})
+	assertCounters(t, h.dbPath, 1, 170, 340)
+	assertRuleClientForRule(t, h.dbPath, globalRuleID, 1, ruleClientState{lastUp: 170, lastDown: 340})
 }
 
 func TestAutoCleanupRunsDuringTickWhenEnabled(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "2"}); err != nil {
@@ -881,7 +880,7 @@ func TestAutoCleanupRunsDuringTickWhenEnabled(t *testing.T) {
 
 func TestAutoCleanupDoesNotRunWhenDisabled(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "2"}); err != nil {
@@ -899,42 +898,84 @@ func TestAutoCleanupDoesNotRunWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestMismatchedClientIdentityMarksMissingAndDoesNotUpdateCounters(t *testing.T) {
+func TestInboundPointerDriftIsAdoptedAndKeepsApplying(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	updateTrafficIdentity(t, h.dbPath, 1, 2, "user@example.com", 110, 220, 330)
+	updateTrafficIdentity(t, h.dbPath, 1, 2, "user@example.com", 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if result.Reconciled != 1 || result.Missing != 0 || result.Applied != 0 {
-		t.Fatalf("result = %#v, want reconciled 1 missing 0 applied 0", result)
+	if result.Applied != 1 || result.Missing != 0 {
+		t.Fatalf("result = %#v, want applied 1 missing 0", result)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	if !ruleClientMissing(t, h.dbPath, 1) {
-		t.Fatal("expected rule client to be marked missing")
+	assertCounters(t, h.dbPath, 1, 150, 300)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 150, lastDown: 300})
+	if got := ruleClientInboundID(t, h.dbPath, 1); got != 2 {
+		t.Fatalf("rule client inbound = %d, want adopted 2", got)
 	}
-	if got := countEvents(t, h.dbPath, store.EventClientMissing); got != 1 {
-		t.Fatalf("missing events = %d, want 1", got)
+	if got := countEvents(t, h.dbPath, store.EventClientMissing); got != 0 {
+		t.Fatalf("missing events = %d, want 0", got)
 	}
+}
+
+func TestExcludePolicySurvivesInboundPointerDrift(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	driftedInbound := int64(2)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
+	defer h.store.Close()
+
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	updateTrafficIdentity(t, h.dbPath, 1, driftedInbound, "user@example.com", 110, 220)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("excluded tick: %v", err)
+	}
+	if result.Applied != 0 {
+		t.Fatalf("result = %#v, want no applied factor while excluded", result)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	if got := ruleClientInboundID(t, h.dbPath, 1); got != driftedInbound {
+		t.Fatalf("suppressed baseline inbound = %d, want adopted %d", got, driftedInbound)
+	}
+
+	if _, err := h.engine.Unexclude(ctx, engine.ExcludeSelector{Email: "user@example.com", InboundID: &driftedInbound}); err != nil {
+		t.Fatalf("unexclude through membership: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 120, 240)
+	result, err = h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("resumed tick: %v", err)
+	}
+	if result.Applied != 1 {
+		t.Fatalf("result = %#v, want factor applied after unexclude", result)
+	}
+	assertCounters(t, h.dbPath, 1, 130, 260)
 }
 
 func TestTickDoesNotApplyRuleReconciledDuringTick(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "disabled@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "disabled@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "disabled@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 	setTickEnable(t, h.dbPath, 1, 0)
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -943,7 +984,7 @@ func TestTickDoesNotApplyRuleReconciledDuringTick(t *testing.T) {
 	if result.Reconciled != 1 || result.ActiveClients != 0 || result.Applied != 0 {
 		t.Fatalf("result = %#v, want reconciled rule skipped before counter updates", result)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
+	assertCounters(t, h.dbPath, 1, 110, 220)
 	if got := countTickRulesInState(t, h.dbPath, store.StateOrphaned); got != 1 {
 		t.Fatalf("orphaned rules = %d, want 1", got)
 	}
@@ -952,7 +993,7 @@ func TestTickDoesNotApplyRuleReconciledDuringTick(t *testing.T) {
 func TestSameEmailDifferentTrafficIDUsesFreshScopeBaseline(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "same@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "same@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "5", InboundID: &inboundID}); err != nil {
@@ -960,7 +1001,7 @@ func TestSameEmailDifferentTrafficIDUsesFreshScopeBaseline(t *testing.T) {
 	}
 	ruleID := scopeRuleID(t, h.dbPath)
 	deleteClientTraffic(t, h.dbPath, 1)
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "same@example.com", 1000, 2000, 3000, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "same@example.com", 1000, 2000, 0)
 
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
@@ -972,14 +1013,14 @@ func TestSameEmailDifferentTrafficIDUsesFreshScopeBaseline(t *testing.T) {
 	if !ruleClientExistsForRule(t, h.dbPath, ruleID, 2) {
 		t.Fatalf("new traffic id was not enrolled")
 	}
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000, lastAllTime: 3000})
-	assertCounters(t, h.dbPath, 2, 1000, 2000, 3000)
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 1000, lastDown: 2000})
+	assertCounters(t, h.dbPath, 2, 1000, 2000)
 }
 
 func TestPersistentInboundScopeEnrollsAfterStaleClientPruned(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "old@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "old@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
@@ -996,7 +1037,7 @@ func TestPersistentInboundScopeEnrollsAfterStaleClientPruned(t *testing.T) {
 		t.Fatalf("stale client was not pruned")
 	}
 
-	insertTickTraffic(t, h.dbPath, 2, 1, 1, "new@example.com", 500, 600, 1100, 0)
+	insertTickTraffic(t, h.dbPath, 2, 1, 1, "new@example.com", 500, 600, 0)
 	result, err := h.runner.Tick(ctx)
 	if err != nil {
 		t.Fatalf("enroll tick: %v", err)
@@ -1011,13 +1052,13 @@ func TestPersistentInboundScopeEnrollsAfterStaleClientPruned(t *testing.T) {
 
 func TestCompareAndSwapRaceRollsBackTick(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
 	h.runner.beforeCounterUpdate = func(ctx context.Context, tx *store.Tx, _ store.ActiveRuleClient, current store.ClientTraffic) error {
 		_, err := tx.ExecContext(ctx, `UPDATE client_traffics SET up = up + 1 WHERE id = ?`, current.ID)
 		return err
@@ -1027,15 +1068,15 @@ func TestCompareAndSwapRaceRollsBackTick(t *testing.T) {
 	if !errors.Is(err, store.ErrRace) {
 		t.Fatalf("expected race error, got %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 100, lastDown: 200, lastAllTime: 300})
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 100, lastDown: 200})
 }
 
 func TestTickRaceRollsBackAlreadyAppliedTargets(t *testing.T) {
 	ctx := context.Background()
 	h := newTickHarness(t, []testTraffic{
-		{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200, allTime: 300},
-		{id: 2, inboundID: 1, email: "second@example.com", up: 100, down: 200, allTime: 300},
+		{id: 1, inboundID: 1, email: "first@example.com", up: 100, down: 200},
+		{id: 2, inboundID: 1, email: "second@example.com", up: 100, down: 200},
 	})
 	defer h.store.Close()
 
@@ -1045,8 +1086,8 @@ func TestTickRaceRollsBackAlreadyAppliedTargets(t *testing.T) {
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "second@example.com", Factor: "5"}); err != nil {
 		t.Fatalf("enable second: %v", err)
 	}
-	setCounters(t, h.dbPath, 1, 110, 220, 330)
-	setCounters(t, h.dbPath, 2, 110, 220, 330)
+	setCounters(t, h.dbPath, 1, 110, 220)
+	setCounters(t, h.dbPath, 2, 110, 220)
 	h.runner.beforeCounterUpdate = func(ctx context.Context, tx *store.Tx, _ store.ActiveRuleClient, current store.ClientTraffic) error {
 		if current.ID != 2 {
 			return nil
@@ -1062,15 +1103,15 @@ func TestTickRaceRollsBackAlreadyAppliedTargets(t *testing.T) {
 	if !strings.Contains(err.Error(), "transaction rolled back") {
 		t.Fatalf("expected rollback message, got %v", err)
 	}
-	assertCounters(t, h.dbPath, 1, 110, 220, 330)
-	assertCounters(t, h.dbPath, 2, 110, 220, 330)
-	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 100, lastDown: 200, lastAllTime: 300})
-	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 100, lastDown: 200, lastAllTime: 300})
+	assertCounters(t, h.dbPath, 1, 110, 220)
+	assertCounters(t, h.dbPath, 2, 110, 220)
+	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 100, lastDown: 200})
+	assertRuleClient(t, h.dbPath, 2, ruleClientState{lastUp: 100, lastDown: 200})
 }
 
 func TestRunTickLogsRecoverableFailure(t *testing.T) {
 	ctx := context.Background()
-	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200, allTime: 300}})
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
 
 	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "5"}); err != nil {
@@ -1101,16 +1142,13 @@ type testTraffic struct {
 	email     string
 	up        int64
 	down      int64
-	allTime   int64
 }
 
 type ruleClientState struct {
-	lastUp      int64
-	lastDown    int64
-	lastAllTime int64
-	remUp       int64
-	remDown     int64
-	remAllTime  int64
+	lastUp   int64
+	lastDown int64
+	remUp    int64
+	remDown  int64
 }
 
 func newTickHarness(t *testing.T, traffics []testTraffic) tickHarness {
@@ -1122,9 +1160,10 @@ func newTickHarness(t *testing.T, traffics []testTraffic) tickHarness {
 	db := openTickDB(t, dbPath)
 	for _, traffic := range traffics {
 		execTickSQL(t, db, `
-			INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-			VALUES(?, ?, 1, ?, ?, ?, ?, 0, 0, 0, 0)
-		`, traffic.id, traffic.inboundID, traffic.email, traffic.up, traffic.down, traffic.allTime)
+			INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+			VALUES(?, ?, 1, ?, ?, ?, 0, 0, 0, 0)
+		`, traffic.id, traffic.inboundID, traffic.email, traffic.up, traffic.down)
+		insertTickMembership(t, db, traffic.id, traffic.inboundID, traffic.email)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close sqlite: %v", err)
@@ -1156,15 +1195,22 @@ func createTickSchema(t *testing.T, dbPath string) {
 	db := openTickDB(t, dbPath)
 	defer db.Close()
 	execTickSQL(t, db, `CREATE TABLE inbounds (id INTEGER PRIMARY KEY)`)
+	execTickSQL(t, db, `CREATE TABLE clients (
+		id INTEGER PRIMARY KEY,
+		email TEXT
+	)`)
+	execTickSQL(t, db, `CREATE TABLE client_inbounds (
+		client_id INTEGER NOT NULL,
+		inbound_id INTEGER NOT NULL
+	)`)
 	execTickSQL(t, db, `
 		CREATE TABLE client_traffics (
 			id INTEGER,
 			inbound_id INTEGER,
 			enable numeric,
-			email TEXT,
+			email TEXT UNIQUE,
 			up INTEGER,
 			down INTEGER,
-			all_time INTEGER,
 			expiry_time INTEGER,
 			total INTEGER,
 			reset INTEGER,
@@ -1173,23 +1219,23 @@ func createTickSchema(t *testing.T, dbPath string) {
 	`)
 }
 
-func setCounters(t *testing.T, dbPath string, id, up, down, allTime int64) {
+func setCounters(t *testing.T, dbPath string, id, up, down int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)
 	defer db.Close()
-	execTickSQL(t, db, `UPDATE client_traffics SET up=?, down=?, all_time=? WHERE id=?`, up, down, allTime, id)
+	execTickSQL(t, db, `UPDATE client_traffics SET up=?, down=? WHERE id=?`, up, down, id)
 }
 
-func assertCounters(t *testing.T, dbPath string, id, wantUp, wantDown, wantAllTime int64) {
+func assertCounters(t *testing.T, dbPath string, id, wantUp, wantDown int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)
 	defer db.Close()
-	var up, down, allTime int64
-	if err := db.QueryRow(`SELECT up, down, all_time FROM client_traffics WHERE id=?`, id).Scan(&up, &down, &allTime); err != nil {
+	var up, down int64
+	if err := db.QueryRow(`SELECT up, down FROM client_traffics WHERE id=?`, id).Scan(&up, &down); err != nil {
 		t.Fatalf("read counters: %v", err)
 	}
-	if up != wantUp || down != wantDown || allTime != wantAllTime {
-		t.Fatalf("counters = up:%d down:%d all_time:%d, want up:%d down:%d all_time:%d", up, down, allTime, wantUp, wantDown, wantAllTime)
+	if up != wantUp || down != wantDown {
+		t.Fatalf("counters = up:%d down:%d, want up:%d down:%d", up, down, wantUp, wantDown)
 	}
 }
 
@@ -1199,10 +1245,10 @@ func assertRuleClient(t *testing.T, dbPath string, trafficID int64, want ruleCli
 	defer db.Close()
 	var got ruleClientState
 	if err := db.QueryRow(`
-		SELECT last_up, last_down, last_all_time, rem_up, rem_down, rem_all_time
+		SELECT last_up, last_down, rem_up, rem_down
 		FROM xui_factor_rule_clients
 		WHERE traffic_id=?
-	`, trafficID).Scan(&got.lastUp, &got.lastDown, &got.lastAllTime, &got.remUp, &got.remDown, &got.remAllTime); err != nil {
+	`, trafficID).Scan(&got.lastUp, &got.lastDown, &got.remUp, &got.remDown); err != nil {
 		t.Fatalf("read rule client: %v", err)
 	}
 	if got != want {
@@ -1216,10 +1262,10 @@ func assertRuleClientForRule(t *testing.T, dbPath string, ruleID, trafficID int6
 	defer db.Close()
 	var got ruleClientState
 	if err := db.QueryRow(`
-		SELECT last_up, last_down, last_all_time, rem_up, rem_down, rem_all_time
+		SELECT last_up, last_down, rem_up, rem_down
 		FROM xui_factor_rule_clients
 		WHERE rule_id=? AND traffic_id=?
-	`, ruleID, trafficID).Scan(&got.lastUp, &got.lastDown, &got.lastAllTime, &got.remUp, &got.remDown, &got.remAllTime); err != nil {
+	`, ruleID, trafficID).Scan(&got.lastUp, &got.lastDown, &got.remUp, &got.remDown); err != nil {
 		t.Fatalf("read rule client: %v", err)
 	}
 	if got != want {
@@ -1227,11 +1273,11 @@ func assertRuleClientForRule(t *testing.T, dbPath string, ruleID, trafficID int6
 	}
 }
 
-func setRuleClientRemainders(t *testing.T, dbPath string, trafficID, remUp, remDown, remAllTime int64) {
+func setRuleClientRemainders(t *testing.T, dbPath string, trafficID, remUp, remDown int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)
 	defer db.Close()
-	execTickSQL(t, db, `UPDATE xui_factor_rule_clients SET rem_up=?, rem_down=?, rem_all_time=? WHERE traffic_id=?`, remUp, remDown, remAllTime, trafficID)
+	execTickSQL(t, db, `UPDATE xui_factor_rule_clients SET rem_up=?, rem_down=? WHERE traffic_id=?`, remUp, remDown, trafficID)
 }
 
 func setRuleClientMissingSince(t *testing.T, dbPath string, trafficID, missingSince int64) {
@@ -1248,25 +1294,35 @@ func deleteClientTraffic(t *testing.T, dbPath string, trafficID int64) {
 	execTickSQL(t, db, `DELETE FROM client_traffics WHERE id=?`, trafficID)
 }
 
-func updateTrafficIdentity(t *testing.T, dbPath string, trafficID, inboundID int64, email string, up, down, allTime int64) {
+func updateTrafficIdentity(t *testing.T, dbPath string, trafficID, inboundID int64, email string, up, down int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)
 	defer db.Close()
 	execTickSQL(t, db, `
 		UPDATE client_traffics
-		SET inbound_id=?, email=?, up=?, down=?, all_time=?
+		SET inbound_id=?, email=?, up=?, down=?
 		WHERE id=?
-	`, inboundID, email, up, down, allTime, trafficID)
+	`, inboundID, email, up, down, trafficID)
+	execTickSQL(t, db, `UPDATE clients SET email=? WHERE id=?`, email, trafficID)
+	execTickSQL(t, db, `DELETE FROM client_inbounds WHERE client_id=?`, trafficID)
+	execTickSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(?, ?)`, trafficID, inboundID)
 }
 
-func insertTickTraffic(t *testing.T, dbPath string, id, inboundID, enable int64, email string, up, down, allTime, total int64) {
+func insertTickMembership(t *testing.T, db *sql.DB, clientID, inboundID int64, email string) {
+	t.Helper()
+	execTickSQL(t, db, `INSERT INTO clients(id, email) VALUES(?, ?)`, clientID, email)
+	execTickSQL(t, db, `INSERT INTO client_inbounds(client_id, inbound_id) VALUES(?, ?)`, clientID, inboundID)
+}
+
+func insertTickTraffic(t *testing.T, dbPath string, id, inboundID, enable int64, email string, up, down, total int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)
 	defer db.Close()
 	execTickSQL(t, db, `
-		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, all_time, expiry_time, total, reset, last_online)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
-	`, id, inboundID, enable, email, up, down, allTime, total)
+		INSERT INTO client_traffics(id, inbound_id, enable, email, up, down, expiry_time, total, reset, last_online)
+		VALUES(?, ?, ?, ?, ?, ?, 0, ?, 0, 0)
+	`, id, inboundID, enable, email, up, down, total)
+	insertTickMembership(t, db, id, inboundID, email)
 }
 
 func setTickTotal(t *testing.T, dbPath string, trafficID, total int64) {
@@ -1313,10 +1369,10 @@ func insertScopeRuleClient(t *testing.T, dbPath string, ruleID, trafficID int64)
 	execTickSQL(t, db, `
 		INSERT INTO xui_factor_rule_clients(
 			rule_id, traffic_id, inbound_id, email,
-			last_up, last_down, last_all_time,
-			rem_up, rem_down, rem_all_time, missing_since, updated_at
+			last_up, last_down,
+			rem_up, rem_down, missing_since, updated_at
 		)
-		SELECT ?, id, inbound_id, email, up, down, all_time, 0, 0, 0, NULL, ?
+		SELECT ?, id, inbound_id, email, up, down, 0, 0, NULL, ?
 		FROM client_traffics
 		WHERE id=?
 	`, ruleID, now, trafficID)
@@ -1351,6 +1407,17 @@ func ruleClientMissing(t *testing.T, dbPath string, trafficID int64) bool {
 		t.Fatalf("read missing_since: %v", err)
 	}
 	return missing.Valid
+}
+
+func ruleClientInboundID(t *testing.T, dbPath string, trafficID int64) int64 {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	var inboundID int64
+	if err := db.QueryRow(`SELECT inbound_id FROM xui_factor_rule_clients WHERE traffic_id=?`, trafficID).Scan(&inboundID); err != nil {
+		t.Fatalf("read rule client inbound: %v", err)
+	}
+	return inboundID
 }
 
 func countEvents(t *testing.T, dbPath, eventType string) int {
@@ -1419,8 +1486,8 @@ func insertDuplicateActiveTarget(t *testing.T, dbPath string) {
 		t.Fatalf("duplicate rule id: %v", err)
 	}
 	execTickSQL(t, db, `
-		INSERT INTO xui_factor_rule_clients(rule_id, traffic_id, inbound_id, email, last_up, last_down, last_all_time, updated_at)
-		VALUES(?, 1, 1, 'user@example.com', 100, 200, 300, ?)
+		INSERT INTO xui_factor_rule_clients(rule_id, traffic_id, inbound_id, email, last_up, last_down, updated_at)
+		VALUES(?, 1, 1, 'user@example.com', 100, 200, ?)
 	`, ruleID, now)
 }
 

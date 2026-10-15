@@ -7,16 +7,18 @@
 
 <h1 align="center">XuiFactor</h1>
 
-<p align="center">Traffic factor sidecar for 3x-ui on Linux.</p>
+<p align="center">Traffic factor sidecar for 3x-ui 3.x on Linux, over SQLite or PostgreSQL.</p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-111111"></a>
-  <img alt="Go 1.22+" src="https://img.shields.io/badge/go-1.22%2B-00ADD8">
-  <img alt="Status: stable" src="https://img.shields.io/badge/status-stable-111111">
+  <img alt="Go 1.25+" src="https://img.shields.io/badge/go-1.25%2B-00ADD8">
+  <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-111111">
   <a href="https://t.me/PdYrust"><img alt="Telegram channel" src="https://img.shields.io/badge/Telegram-%40PdYrust-229ED9?logo=telegram&logoColor=white"></a>
 </p>
 
-XuiFactor applies temporary traffic factors to 3x-ui client counters as a sidecar. It does not modify 3x-ui source code. Rule metadata is stored in the same SQLite database using `xui_factor_*` metadata tables.
+XuiFactor applies temporary traffic factors to 3x-ui client counters as a sidecar. It does not modify 3x-ui source code. Rule metadata is stored in the same database using `xui_factor_*` metadata tables, whether the panel runs on its SQLite file or a PostgreSQL database.
+
+**Requires 3x-ui 3.x** (tested against 3.10.2). Upgrade 3x-ui first and let the panel finish its boot migration before upgrading XuiFactor. On 3.x a client is identified by email and can be attached to several inbounds; inbound scoped commands resolve that membership through the panel's `clients` and `client_inbounds` tables.
 
 Disabling a rule keeps previously factored traffic results. Future traffic after disabling is counted normally.
 
@@ -27,8 +29,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.4.0_linux_amd64.tar.gz
-cd xui-factor_v0.4.0_linux_amd64
+tar -xzf xui-factor_v0.5.0-beta_linux_amd64.tar.gz
+cd xui-factor_v0.5.0-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -47,9 +49,11 @@ Defaults:
 
 ```text
 config: /etc/xui-factor/config.json
-database: /etc/x-ui/x-ui.db
+database: /etc/x-ui/x-ui.db (SQLite) or the panel PostgreSQL DSN
 service: xui-factor.service
 ```
+
+Point XuiFactor at a PostgreSQL panel with `database_backend` and `database_dsn` in the config file, or leave the defaults: the daemon and one-off commands read `XUI_DB_TYPE` and `XUI_DB_DSN` from the panel service environment file (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`). See [docs/OPERATIONS.md](docs/OPERATIONS.md) for backend configuration and migration order.
 
 ## Common Commands
 

@@ -2,6 +2,32 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.5.0-beta - Unreleased
+
+### Added
+
+- 3x-ui 3.x support: schema validation targets the `clients` and `client_inbounds` tables, and inbound scoped commands resolve membership through that authoritative link instead of the stale `client_traffics.inbound_id` pointer.
+- PostgreSQL backend: `database_backend` and `database_dsn` config keys with `XUI_DB_TYPE` and `XUI_DB_DSN` fallbacks, plus a packaged service environment file for automatic detection on panels running PostgreSQL.
+- Reconcile follows a replaced traffic row to the current row by email: rules re-link (`client_relinked` audit event), active excludes and overrides move onto the current row (`policies repaired`), and stale duplicate policy rows are retired. Re-issued excludes or overrides update the moved row instead of duplicating. Missing rule clients whose row returned are revived.
+- `doctor` reports the active database backend, redacts DSN passwords, and probes write access; `backup` uses `pg_dump` on PostgreSQL and writes `.dump` files.
+- Database auto-detection reads the panel service environment file directly (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`), so one-off commands resolve a PostgreSQL panel without extra configuration; the packaged service imports all three distro layouts.
+- PostgreSQL integration tests run in CI against a service database.
+
+### Changed
+
+- Requires 3x-ui 3.x. Legacy databases that still carry `client_traffics.all_time` are rejected with an upgrade hint.
+- Client identity is traffic id plus email; the inbound pointer in `client_traffics` is selection metadata and drift is adopted rather than treated as missing.
+- The `all_time` counter tracking was removed together with the metadata columns that stored its baselines (metadata schema version 3).
+- Duplicate active excludes or overrides left by the previous inbound-keyed identity are disabled by the metadata migration, keeping one active row per client.
+- Backups on SQLite keep the `.db` file extension; PostgreSQL backups use `.dump`.
+- Builds require Go 1.25 or newer.
+
+### Safety
+
+- Upgrade 3x-ui first and let the panel finish its boot migration before upgrading XuiFactor; stop `xui-factor.service` during the panel upgrade.
+- PostgreSQL restores use `pg_restore` against a stopped panel and sidecar; SQLite recovery steps are unchanged.
+- No traffic counters are modified by migrations, doctor, status, explain, report, audit, reconcile, or cleanup.
+
 ## v0.4.0 - Stable
 
 ### Added
