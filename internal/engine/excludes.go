@@ -79,13 +79,16 @@ func (s *Service) Unexclude(ctx context.Context, selector ExcludeSelector) (stor
 		}
 		policy, err = tx.FindActiveExcludeForClient(ctx, client.ID, client.Email)
 		if errors.Is(err, store.ErrNotFound) {
-			// The stored row may still point at a replaced traffic row.
+			// The policy may still reference a replaced traffic row.
 			policy, err = tx.FindActiveExcludeByEmail(ctx, client.Email)
 		}
 		if err != nil {
 			return describeSelectorError("find exclude policy", err)
 		}
 		if err := tx.DisableExclude(ctx, policy.ID, now); err != nil {
+			return err
+		}
+		if _, err := tx.RefreshActiveRuleClientBaselinesForTraffic(ctx, client.ID, client.Email, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
 		message := fmt.Sprintf("exclude policy %d disabled for traffic id %d inbound %d email %s", policy.ID, policy.TrafficID, policy.InboundID, policy.Email)

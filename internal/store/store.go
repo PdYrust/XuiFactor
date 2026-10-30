@@ -12,15 +12,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db            *sql.DB
-	path          string
-	dsn           string
-	driver        string
-	lockTimeoutMs int64
+	db     *sql.DB
+	path   string
+	dsn    string
+	driver string
 }
 
 type Tx struct {
@@ -71,13 +72,18 @@ func open(ctx context.Context, path string, busyTimeout time.Duration, readOnly 
 		return nil, wrapDatabaseError("open database", err)
 	}
 
-	return &Store{db: db, path: path, driver: DriverSQLite, lockTimeoutMs: busyTimeout.Milliseconds()}, nil
+	return &Store{db: db, path: path, driver: DriverSQLite}, nil
 }
 
-// OpenPostgres connects to a 3x-ui PostgreSQL database. Write access is
-// required for commands that apply factors; read-only commands use the same
-// connection because PostgreSQL does not need file-level locking.
 func OpenPostgres(ctx context.Context, dsn string, busyTimeout time.Duration) (*Store, error) {
+	return openPostgres(ctx, dsn, busyTimeout, false)
+}
+
+func OpenPostgresReadOnly(ctx context.Context, dsn string, busyTimeout time.Duration) (*Store, error) {
+	return openPostgres(ctx, dsn, busyTimeout, true)
+}
+
+func openPostgres(ctx context.Context, dsn string, busyTimeout time.Duration, readOnly bool) (*Store, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("database dsn is required")
 	}
@@ -85,10 +91,20 @@ func OpenPostgres(ctx context.Context, dsn string, busyTimeout time.Duration) (*
 		return nil, errors.New("busy timeout must be positive")
 	}
 
-	db, err := sql.Open("pgx", dsn)
+	connConfig, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	// Startup parameters survive reconnects, unlike a SET on one session.
+	connConfig.RuntimeParams["lock_timeout"] = strconv.FormatInt(busyTimeout.Milliseconds(), 10)
+	if readOnly {
+		connConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	}
+	if connConfig.RuntimeParams["application_name"] == "" {
+		connConfig.RuntimeParams["application_name"] = "xui-factor"
+	}
+
+	db := stdlib.OpenDB(*connConfig)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
@@ -97,13 +113,8 @@ func OpenPostgres(ctx context.Context, dsn string, busyTimeout time.Duration) (*
 		db.Close()
 		return nil, wrapDatabaseError("open database", err)
 	}
-	lockTimeout := "SET lock_timeout = '" + strconv.FormatInt(busyTimeout.Milliseconds(), 10) + "ms'"
-	if _, err := db.ExecContext(ctx, lockTimeout); err != nil {
-		db.Close()
-		return nil, wrapDatabaseError("open database", err)
-	}
 
-	return &Store{db: db, dsn: dsn, driver: DriverPostgres, lockTimeoutMs: busyTimeout.Milliseconds()}, nil
+	return &Store{db: db, dsn: dsn, driver: DriverPostgres}, nil
 }
 
 func readOnlyDSN(path string) string {
@@ -187,24 +198,25 @@ func (s *Store) ValidateRequiredSchema(ctx context.Context) error {
 		}
 	}
 
-	columns, err := s.tableColumns(ctx, "client_traffics")
-	if err != nil {
-		return fmt.Errorf("%w: read client_traffics columns: %v", ErrSchema, err)
-	}
-	if columns["all_time"] {
-		return fmt.Errorf("%w: client_traffics.all_time found; upgrade 3x-ui to 3.x before running xui-factor", ErrSchema)
-	}
-	for _, column := range []string{
-		"id",
-		"inbound_id",
-		"enable",
-		"email",
-		"up",
-		"down",
-		"total",
+	for _, required := range []struct {
+		table   string
+		columns []string
+	}{
+		{table: "client_traffics", columns: []string{"id", "inbound_id", "enable", "email", "up", "down", "total"}},
+		{table: "clients", columns: []string{"id", "email"}},
+		{table: "client_inbounds", columns: []string{"client_id", "inbound_id"}},
 	} {
-		if !columns[column] {
-			return fmt.Errorf("%w: missing client_traffics.%s", ErrSchema, column)
+		columns, err := s.tableColumns(ctx, required.table)
+		if err != nil {
+			return fmt.Errorf("%w: read %s columns: %v", ErrSchema, required.table, err)
+		}
+		if required.table == "client_traffics" && columns["all_time"] {
+			return fmt.Errorf("%w: client_traffics.all_time found; upgrade 3x-ui to 3.x before running xui-factor", ErrSchema)
+		}
+		for _, column := range required.columns {
+			if !columns[column] {
+				return fmt.Errorf("%w: missing %s.%s", ErrSchema, required.table, column)
+			}
 		}
 	}
 	return nil
@@ -302,7 +314,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err := tx.ensureMetadataColumns(ctx); err != nil {
 			return fmt.Errorf("run metadata migration: %w", err)
 		}
-		if err := tx.dropLegacyMetadataColumns(ctx); err != nil {
+		if err := tx.dropObsoleteMetadataColumns(ctx); err != nil {
 			return fmt.Errorf("run metadata migration: %w", err)
 		}
 		now := time.Now().Unix()
@@ -367,8 +379,8 @@ func (tx *Tx) ensureMetadataColumns(ctx context.Context) error {
 	return nil
 }
 
-func (tx *Tx) dropLegacyMetadataColumns(ctx context.Context) error {
-	for _, target := range migrationDropColumns {
+func (tx *Tx) dropObsoleteMetadataColumns(ctx context.Context) error {
+	for _, target := range migrationObsoleteColumns {
 		exists, err := tx.TableExists(ctx, target.table)
 		if err != nil {
 			return err
@@ -436,13 +448,6 @@ func (s *Store) WithImmediateTx(ctx context.Context, fn func(*Tx) error) (err er
 	if s.driver == DriverPostgres {
 		if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
 			return wrapDatabaseError("begin write transaction", err)
-		}
-		if s.lockTimeoutMs > 0 {
-			lockTimeout := "SET LOCAL lock_timeout = '" + strconv.FormatInt(s.lockTimeoutMs, 10) + "ms'"
-			if _, err := conn.ExecContext(ctx, lockTimeout); err != nil {
-				_, _ = conn.ExecContext(ctx, "ROLLBACK")
-				return wrapDatabaseError("begin write transaction", err)
-			}
 		}
 		if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", postgresAdvisoryLockKey); err != nil {
 			_, _ = conn.ExecContext(ctx, "ROLLBACK")

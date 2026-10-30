@@ -17,9 +17,8 @@ func postgresEnvMap(env []string) map[string]string {
 }
 
 func TestPostgresCommandEnvForwardsTLSAndStripsPGVars(t *testing.T) {
-	// Parse a DSN pgconn can read without touching the filesystem, then hand
-	// the TLS-bearing DSN to the environment builder: it only parses the
-	// connection string for sslmode and sslrootcert.
+	// sslmode and sslrootcert are read from the DSN string, so the parsed
+	// config can come from a DSN that needs no certificate file.
 	parsed, err := pgconn.ParseConfig("postgres://user:secret@db.example.com:5432/xui?sslmode=require")
 	if err != nil {
 		t.Fatalf("parse dsn: %v", err)
@@ -80,5 +79,10 @@ func TestPostgresCommandEnvTLSModes(t *testing.T) {
 	}
 	if got := postgresEnvMap(postgresCommandEnv(nil, parsedKeyword, keyword))["PGSSLMODE"]; got != "require" {
 		t.Fatalf("keyword dsn PGSSLMODE = %q, want require", got)
+	}
+
+	quoted := "host=h port=5432 user=u dbname=d sslmode = 'require'"
+	if got := postgresEnvMap(postgresCommandEnv(nil, parsedKeyword, quoted))["PGSSLMODE"]; got != "require" {
+		t.Fatalf("quoted keyword dsn PGSSLMODE = %q, want require", got)
 	}
 }

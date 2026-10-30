@@ -66,8 +66,6 @@ func (s *Store) CountActiveRuleClients(ctx context.Context, inboundID *int64) (i
 	}
 	args := []any{StateActive}
 	if inboundID != nil {
-		// Count through the authoritative clients/client_inbounds link so a
-		// drifted client_traffics.inbound_id pointer does not hide clients.
 		query += `
 		INNER JOIN client_traffics ct ON ct.id = rc.traffic_id AND ct.email = rc.email`
 		where = append(where, clientInboundMembership("ct.email"))

@@ -2,6 +2,34 @@
 
 All notable changes to XuiFactor are documented in this file.
 
+## v0.5.1-beta - Unreleased
+
+### Fixed
+
+- PostgreSQL ticks no longer abort when the panel writes traffic at the same moment. The tick locks each traffic row before computing its factor, in the ascending id order the panel's traffic writer uses, so the compare-and-swap update cannot be overtaken and a busy panel no longer starves the daemon.
+- Auto backend detection now matches the panel: PostgreSQL is selected only when `XUI_DB_TYPE` asks for it, so a leftover `XUI_DB_DSN` on a SQLite panel is ignored, and a `database_dsn` in the config file takes precedence over the panel environment.
+- An unknown `database_backend` value is rejected instead of silently falling back to SQLite.
+- `doctor`, `report`, and the daemon log redact the password of URL DSNs without a host, such as `postgres://user:pass@/x-ui?host=/run/postgresql`.
+- The installed systemd unit is identical to the packaged `systemd/xui-factor.service`. Database detection reads the panel environment file directly, so the unit does not import it.
+- A persistent scope that cannot enroll a client owned by another rule records the skip once instead of on every tick. Overlapping inbound scopes previously added an audit event per client every poll interval and logged a tick summary each time.
+- `unexclude` refreshes baselines from the current counters, so traffic from the excluded period is not factored by the next tick.
+- `pg_dump` backups honour quoted `sslmode` and `sslrootcert` values in keyword DSNs.
+
+### Changed
+
+- Read-only commands open PostgreSQL in a read-only session. Every PostgreSQL session sets `lock_timeout` from `busy_timeout` at connect time and identifies itself as `application_name=xui-factor`.
+- Schema validation also checks the `clients` and `client_inbounds` columns XuiFactor reads.
+- `traffic_applied` audit events record `extra_up` and `extra_down` only; report traffic impact sums both fields.
+- The installer creates `/etc/xui-factor/config.json` with mode `0600`, because `database_dsn` can hold a password. Existing config files keep their mode.
+- `backup` prints a `pg_restore` hint on PostgreSQL, and CLI help describes `backup` and `reconcile` for both backends.
+- `make verify-installers` checks that the installed unit matches the packaged unit and that the new config file is private.
+- Regression tests cover concurrent panel writes on PostgreSQL, read-only PostgreSQL sessions, auto backend detection, hostless DSN redaction, one-time skip auditing, and `unexclude` baselines.
+
+### Safety
+
+- No traffic counters are modified by migrations. The metadata schema version stays at 3.
+- The documentation now states that renaming a client in the panel is treated as a different client; rules, excludes, and overrides do not follow a rename.
+
 ## v0.5.0-beta - Unreleased
 
 ### Added

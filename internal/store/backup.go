@@ -40,9 +40,8 @@ func (s *Store) Backup(ctx context.Context, backupDir string, now time.Time) (st
 	return path, nil
 }
 
-// backupPostgres shells out to pg_dump. The connection parameters travel
-// through PG* environment variables so credentials never show up in the
-// process list.
+// Connection parameters reach pg_dump through PG* variables so the password
+// never appears in the process list.
 func (s *Store) backupPostgres(ctx context.Context, backupDir string, now time.Time) (string, error) {
 	path, err := availableBackupPath(backupDir, now, ".dump")
 	if err != nil {
@@ -71,10 +70,9 @@ func (s *Store) backupPostgres(ctx context.Context, backupDir string, now time.T
 	return path, nil
 }
 
-// postgresCommandEnv replaces the PG* variables in base with values taken from
-// the parsed DSN so operator environment settings cannot redirect the dump.
-// TLS parameters from the DSN are forwarded so pg_dump keeps the configured
-// verification level.
+// postgresCommandEnv replaces every inherited PG* variable with values from the
+// DSN, so the dump cannot be redirected to another server and keeps the DSN's
+// TLS verification level.
 func postgresCommandEnv(base []string, parsed *pgconn.Config, dsn string) []string {
 	env := make([]string, 0, len(base)+7)
 	for _, entry := range base {
@@ -108,12 +106,12 @@ func dsnParam(dsn, key string) string {
 	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
 		return u.Query().Get(key)
 	}
-	pattern := regexp.MustCompile(`(?i)(?:^|\s)` + regexp.QuoteMeta(key) + `=([^\s]+)`)
+	pattern := regexp.MustCompile(`(?i)(?:^|\s)` + regexp.QuoteMeta(key) + `\s*=\s*('[^']*'|\S+)`)
 	match := pattern.FindStringSubmatch(dsn)
 	if match == nil {
 		return ""
 	}
-	return match[1]
+	return strings.Trim(match[1], "'")
 }
 
 func availableBackupPath(backupDir string, now time.Time, extension string) (string, error) {

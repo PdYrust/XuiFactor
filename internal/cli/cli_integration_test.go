@@ -594,7 +594,7 @@ func TestCLICleanupSmoke(t *testing.T) {
 func TestCLIReconcileSmoke(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createCLITestSchema(t, dbPath)
-	insertCLITestTraffic(t, dbPath, 1, 1, "legacy@example.com", 100, 200)
+	insertCLITestTraffic(t, dbPath, 1, 1, "orphan@example.com", 100, 200)
 
 	var out, errOut bytes.Buffer
 	app := New(&out, &errOut)
@@ -609,7 +609,7 @@ func TestCLIReconcileSmoke(t *testing.T) {
 		return out.String()
 	}
 
-	run("enable", "--email", "legacy@example.com", "--factor", "2")
+	run("enable", "--email", "orphan@example.com", "--factor", "2")
 	db := openCLITestDB(t, dbPath)
 	execCLITestSQL(t, db, `DELETE FROM xui_factor_rule_clients`)
 	db.Close()

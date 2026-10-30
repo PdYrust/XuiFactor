@@ -139,10 +139,6 @@ func DecideClient(client store.ClientTraffic, candidates []Candidate) (Decision,
 	return decideOne(client.ID, candidates)
 }
 
-func DecideActiveRuleClients(targets []store.ActiveRuleClient) ([]Decision, error) {
-	return Decide(ActiveRuleCandidates(targets))
-}
-
 func ExcludeCandidatesForActiveTargets(excludes []store.ExcludePolicy, targets []store.ActiveRuleClient) []Candidate {
 	type targetKey struct {
 		trafficID int64

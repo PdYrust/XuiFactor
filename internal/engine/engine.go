@@ -78,8 +78,6 @@ func (s *Service) Enable(ctx context.Context, req EnableRequest) (store.Rule, er
 			return err
 		}
 
-		// Single-user rules keep the inbound the operator asked for; without an
-		// explicit inbound the live client pointer is recorded.
 		ruleInboundID := client.InboundID
 		if req.InboundID != nil {
 			ruleInboundID = *req.InboundID

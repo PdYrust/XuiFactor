@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"strconv"
 	"strings"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 const (
@@ -18,11 +16,9 @@ type queryRowFunc func(ctx context.Context, query string, args ...any) *sql.Row
 
 type queryFunc func(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 
-// postgresAdvisoryLockKey serializes xui-factor writers on a shared
-// PostgreSQL panel database the same way BEGIN IMMEDIATE does on SQLite.
+// Serializes xui-factor writers on PostgreSQL the way BEGIN IMMEDIATE does on SQLite.
 const postgresAdvisoryLockKey = int64(0x58554946_4143544F) // XUIFACTO
 
-// migrationIDPlaceholder marks the per-dialect identity column in metadata DDL.
 const migrationIDPlaceholder = "__ID_COLUMN__"
 
 const (
@@ -49,9 +45,8 @@ func (s *Store) queryRowContext(ctx context.Context, query string, args ...any) 
 	return s.db.QueryRowContext(ctx, s.rebind(query), args...)
 }
 
-// rebindPostgres rewrites ? placeholders to $N, skipping single-quoted string
-// literals. Every statement in this package uses ? placeholders and none of
-// the literals contain a question mark.
+// rebindPostgres rewrites ? placeholders to $N outside single-quoted literals.
+// It does not understand comments or dollar quoting.
 func rebindPostgres(query string) string {
 	if !strings.Contains(query, "?") {
 		return query
@@ -95,9 +90,9 @@ func migrationStatements(driver string) []string {
 	return statements
 }
 
-// enableAsIntExpr renders the client enable column as 0/1. 3x-ui keeps the
-// column as boolean on PostgreSQL but an integer column can exist before the
-// panel's own normalization runs, so PostgreSQL compares text forms.
+// The panel stores enable as boolean on PostgreSQL, but an imported database
+// can still carry an integer column until the panel normalizes it. Comparing
+// the text form works for both.
 func enableAsIntExpr(driver string) string {
 	if driver == DriverPostgres {
 		return "CASE WHEN enable::text IN ('1', 'true', 't', 'yes') THEN 1 ELSE 0 END"
@@ -105,8 +100,6 @@ func enableAsIntExpr(driver string) string {
 	return "CASE WHEN enable THEN 1 ELSE 0 END"
 }
 
-// enableTrueExpr is the WHERE clause form of enableAsIntExpr; alias may be
-// empty for unqualified queries.
 func enableTrueExpr(driver, alias string) string {
 	if driver == DriverPostgres {
 		return alias + "enable::text IN ('1', 'true', 't', 'yes')"
@@ -114,9 +107,8 @@ func enableTrueExpr(driver, alias string) string {
 	return alias + "enable"
 }
 
-// ProbeWrite verifies the connection can perform the writes xui-factor needs.
-// Everything runs inside a rolled-back transaction: an update of the metadata
-// sentinel when the metadata exists, otherwise a create of the probe table.
+// ProbeWrite issues a representative write inside a transaction that is
+// always rolled back.
 func (s *Store) ProbeWrite(ctx context.Context) error {
 	if s.driver != DriverPostgres {
 		return nil
@@ -153,8 +145,6 @@ func (s *Store) ProbeWrite(ctx context.Context) error {
 	return nil
 }
 
-// insertReturningID inserts a row and reports its identity. SQLite reports it
-// through LastInsertId; PostgreSQL needs a RETURNING clause.
 func (tx *Tx) insertReturningID(ctx context.Context, query string, args ...any) (int64, error) {
 	if tx.driver == DriverPostgres {
 		var id int64

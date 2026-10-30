@@ -8,98 +8,40 @@ import (
 )
 
 func (tx *Tx) UpsertExclude(ctx context.Context, policy ExcludePolicy) (ExcludePolicy, error) {
-	existing, created, err := tx.findExcludeForUpsert(ctx, policy.TrafficID, policy.Email)
+	existing, found, err := tx.findExcludeForUpsert(ctx, policy.TrafficID, policy.Email)
 	if err != nil {
 		return ExcludePolicy{}, err
 	}
-	if created {
-		_, err = tx.ExecContext(ctx, `
+	note := strings.TrimSpace(policy.Note)
+	if !found {
+		id, err := tx.insertReturningID(ctx, `
 			INSERT INTO xui_factor_excludes(
 				traffic_id, inbound_id, email, state, note,
 				created_at, updated_at, activated_at, disabled_at
 			)
 			VALUES(?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)
-			ON CONFLICT(traffic_id, inbound_id, email) DO UPDATE SET
-				state = excluded.state,
-				note = excluded.note,
-				updated_at = excluded.updated_at,
-				activated_at = excluded.activated_at,
-				disabled_at = NULL
-		`, policy.TrafficID, policy.InboundID, policy.Email, StateActive, strings.TrimSpace(policy.Note), policy.CreatedAt, policy.UpdatedAt, policy.ActivatedAt)
+		`, policy.TrafficID, policy.InboundID, policy.Email, StateActive, note, policy.CreatedAt, policy.UpdatedAt, policy.ActivatedAt)
 		if err != nil {
 			return ExcludePolicy{}, err
 		}
-		return tx.FindExcludeForClient(ctx, policy.TrafficID, policy.Email)
+		return tx.FindExcludeByID(ctx, id)
 	}
 
-	if existing.TrafficID != policy.TrafficID {
-		// The stored row points at a replaced traffic row; move it onto the
-		// current row for the same client instead of inserting a duplicate.
-		moved, err := tx.relinkExclude(ctx, existing.ID, policy)
-		if err != nil {
-			return ExcludePolicy{}, err
-		}
-		if moved {
-			return tx.FindExcludeByID(ctx, existing.ID)
-		}
-		// Another row already targets the current traffic row; retire the stale
-		// one and update the current row instead.
-		if err := tx.DisableExclude(ctx, existing.ID, policy.UpdatedAt); err != nil {
-			return ExcludePolicy{}, err
-		}
-		current, err := tx.FindExcludeForClient(ctx, policy.TrafficID, policy.Email)
-		if err != nil {
-			return ExcludePolicy{}, err
-		}
-		if err := tx.updateExcludeFields(ctx, current.ID, policy); err != nil {
-			return ExcludePolicy{}, err
-		}
-		return tx.FindExcludeByID(ctx, current.ID)
-	}
-
-	if err := tx.updateExcludeFields(ctx, existing.ID, policy); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE xui_factor_excludes
+		SET traffic_id = ?, inbound_id = ?, state = ?, note = NULLIF(?, ''),
+			updated_at = ?, activated_at = ?, disabled_at = NULL
+		WHERE id = ?
+	`, policy.TrafficID, policy.InboundID, StateActive, note, policy.UpdatedAt, policy.ActivatedAt, existing.ID); err != nil {
 		return ExcludePolicy{}, err
 	}
 	return tx.FindExcludeByID(ctx, existing.ID)
 }
 
-func (tx *Tx) updateExcludeFields(ctx context.Context, id int64, policy ExcludePolicy) error {
-	_, err := tx.ExecContext(ctx, `
-		UPDATE xui_factor_excludes
-		SET inbound_id = ?, state = ?, note = NULLIF(?, ''),
-			updated_at = ?, activated_at = ?, disabled_at = NULL
-		WHERE id = ?
-	`, policy.InboundID, StateActive, strings.TrimSpace(policy.Note), policy.UpdatedAt, policy.ActivatedAt, id)
-	return err
-}
-
-// relinkExclude moves a policy row onto the client's current traffic row. It
-// reports false when another row already targets that traffic row.
-func (tx *Tx) relinkExclude(ctx context.Context, id int64, policy ExcludePolicy) (bool, error) {
-	result, err := tx.ExecContext(ctx, `
-		UPDATE xui_factor_excludes
-		SET traffic_id = ?, inbound_id = ?, state = ?, note = NULLIF(?, ''),
-			updated_at = ?, activated_at = ?, disabled_at = NULL
-		WHERE id = ?
-			AND NOT EXISTS (
-				SELECT 1 FROM xui_factor_excludes other
-				WHERE other.email = ? AND other.traffic_id = ? AND other.id <> ?
-			)
-	`, policy.TrafficID, policy.InboundID, StateActive, strings.TrimSpace(policy.Note), policy.UpdatedAt, policy.ActivatedAt, id, policy.Email, policy.TrafficID, id)
-	if err != nil {
-		return false, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return affected == 1, nil
-}
-
-// RelinkExcludeRow moves an active exclude onto the given traffic row. When
-// another row already occupies the target (traffic row, inbound, email) tuple,
-// an active occupant keeps the policy and this row is retired, while an
-// inactive occupant is reactivated with this row's note in its place.
+// RelinkExcludeRow moves an active exclude onto the given traffic row. If
+// another row already holds the target (traffic, inbound, email) tuple, an
+// active holder keeps the policy and this row is disabled; an inactive holder
+// is reactivated with this row's note instead.
 func (tx *Tx) RelinkExcludeRow(ctx context.Context, policy ExcludePolicy, current ClientTraffic, now int64) error {
 	var occupantID int64
 	var occupantState string
@@ -133,32 +75,32 @@ func (tx *Tx) RelinkExcludeRow(ctx context.Context, policy ExcludePolicy, curren
 	return tx.DisableExclude(ctx, policy.ID, now)
 }
 
-// findExcludeForUpsert prefers an active row so reactivation can never leave
-// two active rows for one client; without one it falls back to the newest row,
-// including a stale row that still points at a replaced traffic row.
+// findExcludeForUpsert prefers the active row, then the newest row for this
+// traffic row, then the newest row for the email. Only the last case can point
+// at a replaced traffic row, and then no row exists for the current one.
 func (tx *Tx) findExcludeForUpsert(ctx context.Context, trafficID int64, email string) (ExcludePolicy, bool, error) {
 	existing, err := tx.FindActiveExcludeForClient(ctx, trafficID, email)
 	if err == nil {
-		return existing, false, nil
+		return existing, true, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return ExcludePolicy{}, false, err
 	}
 	existing, err = tx.FindExcludeForClient(ctx, trafficID, email)
 	if err == nil {
-		return existing, false, nil
+		return existing, true, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return ExcludePolicy{}, false, err
 	}
 	existing, err = tx.FindExcludeByEmail(ctx, email)
 	if errors.Is(err, ErrNotFound) {
-		return ExcludePolicy{}, true, nil
+		return ExcludePolicy{}, false, nil
 	}
 	if err != nil {
 		return ExcludePolicy{}, false, err
 	}
-	return existing, false, nil
+	return existing, true, nil
 }
 
 func (tx *Tx) DisableExclude(ctx context.Context, id, now int64) error {
@@ -205,9 +147,6 @@ func (tx *Tx) FindExcludeForClient(ctx context.Context, trafficID int64, email s
 	return scanExclude(row)
 }
 
-// FindExcludeByEmail reports the newest exclude row for a client regardless of
-// the stored traffic row, which may point at a replaced row after a 3.x panel
-// upgrade or client rename.
 func (tx *Tx) FindExcludeByEmail(ctx context.Context, email string) (ExcludePolicy, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT id, traffic_id, inbound_id, email, state, COALESCE(note, ''),
@@ -263,9 +202,7 @@ func (s *Store) ListExcludes(ctx context.Context, includeInactive bool, inboundI
 	where := make([]string, 0, 2)
 	args := make([]any, 0, 3)
 	if inboundID != nil {
-		// Resolve the inbound through the authoritative clients/client_inbounds
-		// link; fall back to the stored pointer only for clients whose traffic
-		// row is gone.
+		// Policies whose traffic row is gone fall back to the stored inbound.
 		query += `
 		LEFT JOIN client_traffics ct ON ct.id = ex.traffic_id AND ct.email = ex.email`
 	}

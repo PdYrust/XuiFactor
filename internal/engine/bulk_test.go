@@ -497,8 +497,7 @@ func TestConsolidationFollowsClientNotStaleInboundPointer(t *testing.T) {
 	if _, err := svc.Enable(ctx, EnableRequest{Email: "pointer@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
 		t.Fatalf("enable pointer: %v", err)
 	}
-	// The stored rule inbound is stale selection metadata; consolidation follows
-	// the client, which is a member of the scope's inbound.
+	// Consolidation follows inbound membership, not the inbound stored on the rule.
 	corruptRuleInbound(t, dbPath, latestActiveSingleRuleID(t, dbPath), 2)
 
 	result, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID})

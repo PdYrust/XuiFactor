@@ -167,64 +167,72 @@ func TestDatabaseFlagSelectsSQLiteBackend(t *testing.T) {
 }
 
 func TestReleaseMetadata(t *testing.T) {
+	const release = "0.5.1-beta"
 	version := strings.TrimSpace(readRepoFile(t, "VERSION"))
-	if version != "0.5.0-beta" {
-		t.Fatalf("expected VERSION to be 0.5.0-beta, got %q", version)
+	if version != release {
+		t.Fatalf("expected VERSION to be %s, got %q", release, version)
 	}
+	amd64Package := "xui-factor_v" + release + "_linux_amd64.tar.gz"
+	arm64Package := "xui-factor_v" + release + "_linux_arm64.tar.gz"
 
 	readme := readRepoFile(t, "README.md")
-	for _, want := range []string{
-		"xui-factor_v0.5.0-beta_linux_amd64.tar.gz",
-		"license-AGPL--3.0-111111",
-		"status-beta-111111",
-	} {
+	for _, want := range []string{amd64Package, "license-AGPL--3.0-111111", "status-beta-111111"} {
 		if !strings.Contains(readme, want) {
 			t.Fatalf("expected README to contain %q", want)
 		}
 	}
-	if strings.Contains(readme, "xui-factor_v0.4.0_linux") {
-		t.Fatalf("README still contains stale v0.4.0 package examples")
-	}
-	if strings.Contains(readme, "xui-factor_v0.5.0_linux") {
-		t.Fatalf("README still contains stale stable v0.5.0 package examples")
-	}
 
 	operations := readRepoFile(t, "docs/OPERATIONS.md")
-	if !strings.Contains(operations, "xui-factor_v0.5.0-beta_linux_amd64.tar.gz") {
-		t.Fatalf("operations guide does not contain the v0.5.0-beta package example")
+	if !strings.Contains(operations, amd64Package) {
+		t.Fatalf("operations guide does not contain the %s package example", release)
 	}
-	if strings.Contains(operations, "xui-factor_v0.4.0_linux") {
-		t.Fatalf("operations guide still contains stale v0.4.0 package examples")
+
+	for path, text := range map[string]string{"README.md": readme, "docs/OPERATIONS.md": operations} {
+		for _, other := range packageExamples(text) {
+			if other != "v"+release {
+				t.Fatalf("%s contains a %s package example, want only v%s", path, other, release)
+			}
+		}
 	}
 
 	releaseWorkflow := readRepoFile(t, ".github/workflows/release.yml")
-	for _, want := range []string{"v0.5.0-beta", "docs/releases/v0.5.0-beta.md", "default: false"} {
+	for _, want := range []string{"for example v" + release, "docs/releases/v" + release + ".md", "default: false"} {
 		if !strings.Contains(releaseWorkflow, want) {
 			t.Fatalf("expected release workflow to contain %q", want)
 		}
 	}
-	if strings.Contains(releaseWorkflow, "v0.4.0") {
-		t.Fatalf("release workflow still contains stale v0.4.0 examples")
-	}
 
-	releaseNotes := readRepoFile(t, "docs/releases/v0.5.0-beta.md")
-	for _, want := range []string{
-		"# XuiFactor v0.5.0-beta",
-		"xui-factor_v0.5.0-beta_linux_amd64.tar.gz",
-		"xui-factor_v0.5.0-beta_linux_arm64.tar.gz",
-	} {
+	releaseNotes := readRepoFile(t, "docs/releases/v"+release+".md")
+	for _, want := range []string{"# XuiFactor v" + release, amd64Package, arm64Package} {
 		if !strings.Contains(releaseNotes, want) {
-			t.Fatalf("expected v0.5.0-beta release notes to contain %q", want)
+			t.Fatalf("expected v%s release notes to contain %q", release, want)
 		}
-	}
-	if strings.Contains(releaseNotes, "xui-factor_v0.5.0_linux") {
-		t.Fatalf("release notes still contain stale stable v0.5.0 package examples")
 	}
 
 	changelog := readRepoFile(t, "CHANGELOG.md")
-	if !strings.Contains(changelog, "## v0.5.0-beta - Unreleased") {
-		t.Fatalf("changelog is missing the v0.5.0-beta entry")
+	if !strings.Contains(changelog, "## v"+release+" - Unreleased") {
+		t.Fatalf("changelog is missing the v%s entry", release)
 	}
+
+	install := readRepoFile(t, ".github/ISSUE_TEMPLATE/installation-update.yml")
+	if !strings.Contains(install, "placeholder: "+release) {
+		t.Fatalf("installation issue template does not suggest version %s", release)
+	}
+}
+
+func packageExamples(text string) []string {
+	var versions []string
+	for _, field := range strings.Fields(text) {
+		_, rest, ok := strings.Cut(field, "xui-factor_")
+		if !ok {
+			continue
+		}
+		version, _, ok := strings.Cut(rest, "_linux")
+		if ok {
+			versions = append(versions, version)
+		}
+	}
+	return versions
 }
 
 func TestIssueTemplates(t *testing.T) {

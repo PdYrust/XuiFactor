@@ -175,7 +175,7 @@ func TestPostgresClientSelectionAndCounters(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	// The client is a member of inbound 10 while the legacy pointer says 99.
+	// The client is a member of inbound 10 while its traffic row points at 99.
 	insertPostgresTraffic(t, ctx, st, 1, 10, true, "user@example.com", 100, 200, 0)
 	insertPostgresTraffic(t, ctx, st, 2, 11, false, "disabled@example.com", 0, 0, 0)
 	if _, err := st.execContext(ctx, `UPDATE client_traffics SET inbound_id = 99 WHERE id = 1`); err != nil {
@@ -241,8 +241,7 @@ func TestPostgresClientSelectionAndCounters(t *testing.T) {
 		t.Fatalf("counters = up %d down %d, want 110/220", up, down)
 	}
 
-	// The panel may still carry an integer enable column before its own
-	// normalization runs; reads must stay portable across both shapes.
+	// Reads must also work while enable is still an integer column.
 	if _, err := st.execContext(ctx, `
 		ALTER TABLE client_traffics ALTER COLUMN enable TYPE integer USING CASE WHEN enable THEN 1 ELSE 0 END
 	`); err != nil {
@@ -315,7 +314,7 @@ func TestPostgresRuleLifecycleAndRelink(t *testing.T) {
 		t.Fatalf("rule id = %d, want identity value", ruleID)
 	}
 
-	// The panel replaced the email-keyed traffic row; relink follows the email.
+	// The client is recreated under the same email; relink follows the email.
 	if _, err := st.execContext(ctx, `DELETE FROM client_traffics WHERE id = 1`); err != nil {
 		t.Fatalf("delete traffic row: %v", err)
 	}
@@ -466,7 +465,7 @@ func TestPostgresPolicyUpsertAndListFilter(t *testing.T) {
 		t.Fatalf("meta roundtrip = %d (%v), want 1700000000", meta, err)
 	}
 
-	// The panel replaced the traffic row; re-issuing the exclude must move the
+	// The client gets a new traffic row; re-issuing the exclude must move the
 	// stored row instead of inserting a duplicate.
 	if _, err := st.execContext(ctx, `DELETE FROM client_traffics WHERE id = 1`); err != nil {
 		t.Fatalf("delete replaced row: %v", err)
@@ -531,6 +530,38 @@ func TestPostgresWriteProbe(t *testing.T) {
 	}
 	if leftover != "" {
 		t.Fatalf("probe table left behind: %s", leftover)
+	}
+}
+
+func TestPostgresReadOnlySessionRejectsWrites(t *testing.T) {
+	st, ctx := openPostgresTestStore(t)
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	insertPostgresTraffic(t, ctx, st, 1, 10, true, "user@example.com", 100, 200, 0)
+
+	readOnly, err := OpenPostgresReadOnly(ctx, requirePostgresDSN(t), 2*time.Second)
+	if err != nil {
+		t.Fatalf("open read-only store: %v", err)
+	}
+	defer readOnly.Close()
+	if _, err := readOnly.ListRules(ctx, true); err != nil {
+		t.Fatalf("read through read-only session: %v", err)
+	}
+	err = readOnly.WithReadTx(ctx, func(tx *Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE client_traffics SET up = up + 1 WHERE id = 1`)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("write in read-only session = %v, want read-only rejection", err)
+	}
+
+	var lockTimeout string
+	if err := readOnly.queryRowContext(ctx, `SELECT current_setting('lock_timeout')`).Scan(&lockTimeout); err != nil {
+		t.Fatalf("read lock_timeout: %v", err)
+	}
+	if lockTimeout != "2s" {
+		t.Fatalf("lock_timeout = %q, want 2s from the busy timeout", lockTimeout)
 	}
 }
 

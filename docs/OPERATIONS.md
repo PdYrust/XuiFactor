@@ -6,9 +6,9 @@ XuiFactor is a Linux sidecar for 3x-ui 3.x servers. It applies temporary traffic
 
 Rule metadata is stored in the panel database using `xui_factor_*` metadata tables. Factored traffic remains in the 3x-ui counters after a rule is disabled, and future traffic after disabling is counted normally.
 
-On 3.x a client is identified by email and can be attached to several inbounds. XuiFactor resolves inbound membership through the authoritative `clients` and `client_inbounds` tables; the `client_traffics.inbound_id` pointer is treated as informational and may go stale.
+On 3.x a client is identified by email and can be attached to several inbounds. XuiFactor resolves inbound membership through the panel's `clients` and `client_inbounds` tables; the `client_traffics.inbound_id` column names only one of the attached inbounds and is treated as informational.
 
-Upgrade 3x-ui first, let the panel finish its boot migration, and only then upgrade XuiFactor. Legacy databases that still contain `client_traffics.all_time` are rejected with an upgrade hint.
+Upgrade 3x-ui first, let the panel finish its boot migration, and only then upgrade XuiFactor. A panel database that predates 3.x (its `client_traffics` table still has `all_time`) is rejected with an upgrade hint.
 
 Repository: https://github.com/PdYrust/XuiFactor
 
@@ -17,8 +17,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.5.0-beta_linux_amd64.tar.gz
-cd xui-factor_v0.5.0-beta_linux_amd64
+tar -xzf xui-factor_v0.5.1-beta_linux_amd64.tar.gz
+cd xui-factor_v0.5.1-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -58,11 +58,13 @@ Database backends are selected with `database_backend` and `database_dsn`:
 }
 ```
 
-- `auto` (default): a configured DSN selects PostgreSQL, otherwise SQLite.
+- `auto` (default): a `database_dsn` in the config file selects PostgreSQL; otherwise the panel's own setting decides, as described below.
 - `sqlite`: use `database_path`.
-- `postgres`: use `database_dsn`, for example `postgres://x-ui:password@127.0.0.1:5432/x-ui?sslmode=disable`.
+- `postgres`: use `database_dsn`, for example `postgres://x-ui:password@127.0.0.1:5432/x-ui?sslmode=disable`. When `database_dsn` is empty, `XUI_DB_DSN` is used.
 
-When the config file leaves the backend on `auto`, XuiFactor reads `XUI_DB_TYPE` and `XUI_DB_DSN` from its environment and from the panel service environment file directly (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`, depending on the distro — the packaged systemd unit imports all three layouts). A panel running PostgreSQL is therefore detected without extra configuration for both the daemon and one-off commands. Process environment variables win over the file, and explicit config file values win over both.
+On `auto` without a configured DSN, XuiFactor resolves the backend the same way 3x-ui does: PostgreSQL is used only when `XUI_DB_TYPE` is `postgres` (or `postgresql`, `pg`), and the connection string comes from `XUI_DB_DSN`. Both values are read from the process environment first and then from the panel service environment file (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`, depending on the distro), so the daemon and one-off commands detect a PostgreSQL panel without extra configuration. A leftover `XUI_DB_DSN` on a SQLite panel is ignored. Unknown `database_backend` values are rejected.
+
+The installer creates the config file with mode `0600` because `database_dsn` can hold a password. Commands print the DSN with the password redacted.
 
 Cleanup defaults:
 
@@ -81,7 +83,7 @@ Run doctor before applying rules:
 xui-factor doctor
 ```
 
-Doctor checks config loading, the active database backend and connection, database access and write access, required 3x-ui 3.x schema, XuiFactor metadata readiness, backup directory access, rule counts, and service state where available.
+Doctor checks config loading, the active database backend and connection, database access and write access, the required 3x-ui 3.x tables and columns (`client_traffics`, `inbounds`, `clients`, `client_inbounds`), XuiFactor metadata readiness, backup directory access, rule counts, and service state where available.
 
 ## 6. Backups
 
@@ -91,7 +93,7 @@ Create a backup before broad changes:
 xui-factor backup
 ```
 
-Backups are written to the configured backup directory and the command prints the final backup path. On SQLite the backup is a consistent `.db` file. On PostgreSQL the backup is a `.dump` file created with `pg_dump`; install the PostgreSQL client tools on the host for this command.
+Backups are written to the configured backup directory and the command prints the final backup path. On SQLite the backup is a consistent `.db` file. On PostgreSQL the backup is a `.dump` file created with `pg_dump`; install PostgreSQL client tools whose major version is at least the server's. The dump uses the connection settings from the configured DSN, including its TLS settings, and ignores `PG*` variables in the calling environment.
 
 ## 7. Single-user factor rules
 
@@ -115,7 +117,9 @@ xui-factor enable-all --factor 1.2
 
 `enable-all` is persistent by default. Current matching clients are enrolled immediately, and future matching clients are enrolled by the daemon tick from their current counters. Traffic that happened before enrollment is not multiplied.
 
-Compatible active single-user rules are consolidated into the persistent scope. Existing baselines and remainders are preserved, and the old single-user rules become merged metadata that cleanup can prune later.
+Compatible active single-user rules are consolidated into the persistent scope. Existing baselines and remainders are preserved, and the adopted single-user rules become merged metadata that cleanup can prune later.
+
+A client belongs to the first active rule or scope that enrolls it, which matters when a client is attached to several inbounds with their own scopes. Another scope that also matches the client leaves it with the owner and records the skip once as a `scope_auto_enroll_skipped` audit event.
 
 Apply a factor only to clients with a configured traffic limit:
 
@@ -165,7 +169,7 @@ Disable an exclude:
 xui-factor unexclude --email User --inbound-id 1
 ```
 
-An exclude is tied to the client (traffic id and email). It stops future factor updates for that client but does not subtract previously factored traffic. The stored inbound is informational and follows the client when it moves between inbounds. After `unexclude`, matching rules and scopes can factor future traffic from the current counters; traffic that arrived while excluded is not retroactively factored.
+An exclude is tied to the client (traffic id and email). It stops future factor updates for that client but does not subtract previously factored traffic. The stored inbound is informational and follows the client when it moves between inbounds. `unexclude` refreshes the client's baselines from the current counters, so matching rules and scopes factor only traffic that arrives afterwards; traffic from the excluded period is not retroactively factored.
 
 ## 11. Override policies
 
@@ -215,7 +219,7 @@ Effective views use the same precedence as tick:
 exclude > override > single-user rule > inbound scope > global scope
 ```
 
-Explain and effective status are read-only. They do not create audit events, refresh baselines, or modify 3x-ui counters.
+Explain and effective status are read-only. They do not create audit events, refresh baselines, or modify 3x-ui counters. Read-only commands open SQLite in read-only mode and PostgreSQL in a read-only session.
 
 ## 13. Pause and resume
 
@@ -294,6 +298,8 @@ journalctl -u xui-factor.service -f
 
 The service runs `xui-factor` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
 
+Each tick runs in one write transaction. On SQLite the transaction holds the database write lock, so the panel waits up to its busy timeout. On PostgreSQL the tick locks only the traffic rows of the clients it factors, in the same order the panel's traffic writer uses, so concurrent panel traffic writes wait briefly instead of aborting the tick. `busy_timeout` bounds how long XuiFactor waits for those locks.
+
 ## 17. Report, status, and audit
 
 Show a concise management report:
@@ -303,7 +309,7 @@ xui-factor report
 xui-factor report --inbound-id 1
 ```
 
-Report summarizes active scopes, single-user rules, excludes, overrides, effective clients, service state, metadata state, and traffic impact. Traffic impact is aggregated from `traffic_applied` audit events. Traffic audit events added before v0.3.4-beta may not include all filter metadata; older events are not rewritten.
+Report summarizes active scopes, single-user rules, excludes, overrides, effective clients, service state, metadata state, and traffic impact. Traffic impact sums the `extra_up` and `extra_down` bytes of `traffic_applied` audit events within audit retention.
 
 List effective active and paused rules:
 
@@ -311,7 +317,7 @@ List effective active and paused rules:
 xui-factor status
 ```
 
-Normal status hides orphaned, merged, and ineffective legacy rules. Persistent scopes remain visible with their current materialized client count.
+Normal status hides orphaned, merged, and ineffective rules. Persistent scopes remain visible with their current materialized client count.
 
 Normal status summarizes active scopes, active single-user rules, active policies, and effective factored clients. Active excludes and overrides are shown as policies. Scope lines show an `effective=` count when policies reduce the number of clients that currently receive the scope factor.
 
@@ -339,18 +345,20 @@ xui-factor audit --since 24h
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
 
-## 18. Reconcile legacy metadata
+## 18. Reconcile rules and policies
 
-Reconcile older active single-user rules after upgrading or after manual database repair:
+Reconcile active single-user rules and policies after a panel upgrade, bulk client changes, or manual database repair:
 
 ```sh
 xui-factor reconcile --dry-run
 xui-factor reconcile
 ```
 
-Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible legacy rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned legacy rules are inactive and are pruned later by cleanup retention.
+Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible single-user rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned rules are inactive and are pruned later by cleanup retention. The daemon runs the same reconciliation at the start of every tick.
 
-When the panel replaces the email-keyed traffic row (for example during a 3.x upgrade merge or a client rename), reconcile follows the email to the current row and re-links the rule (`client_relinked` audit event) instead of orphaning it. Active excludes and overrides move onto the current row too, counted as `policies repaired`; a duplicate row that already targets the current traffic row retires the stale one. Missing rule clients whose row has returned are revived with a refreshed baseline.
+When a client is deleted and recreated under the same email, the panel gives it a new traffic row. Reconcile follows the email to that row and re-links the rule (`client_relinked` audit event) instead of orphaning it. Active excludes and overrides move onto the current row too, counted as `policies repaired`; when a policy row already targets the current traffic row, the outdated one is disabled. Missing rule clients whose row has returned are revived with a refreshed baseline.
+
+Renaming a client in the panel keeps its traffic row but changes the email. XuiFactor identifies a client by traffic id and email, so it treats the renamed client as a different client: single-user rules for the old email are orphaned, excludes and overrides for the old email stop matching, and persistent scopes enroll the renamed client from its current counters once cleanup has pruned the old tracking after `missing_client_grace`. Re-issue excludes and overrides for the new email.
 
 Re-issuing `exclude` or `override` for a client whose stored row was replaced moves the existing row onto the current traffic row instead of creating a duplicate, and `unexclude` and `remove-override` still find the moved row.
 
@@ -416,7 +424,7 @@ Remove XuiFactor-owned config and shared files:
 sudo ./scripts/uninstall.sh --purge
 ```
 
-Uninstall and purge must not remove `/etc/x-ui/x-ui.db`.
+Uninstall and purge do not remove `/etc/x-ui/x-ui.db` and do not touch a PostgreSQL panel database.
 
 ## 22. Recovery expectations
 
@@ -442,7 +450,7 @@ Keep backup files until the recovered server has been verified.
 - Use `xui-factor override --email User --inbound-id 1 --factor 1.2` when one exact client needs a different future factor.
 - Use `xui-factor explain --email User --inbound-id 1` when the final decision is unclear.
 - Use `--limited-only` if unlimited clients should be skipped.
-- Run `xui-factor reconcile --dry-run` after upgrades with legacy active rules.
+- Run `xui-factor reconcile --dry-run` after panel upgrades or bulk client changes.
 - Run `xui-factor cleanup --dry-run` before manual metadata cleanup.
 - Verify `xui-factor status` and `xui-factor audit` after changes.
 - Keep backup files before uninstall or purge.

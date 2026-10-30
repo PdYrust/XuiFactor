@@ -80,7 +80,7 @@ func TestReconcileRelinksRuleAfterTrafficRowReplaced(t *testing.T) {
 	}
 	ruleID := firstActiveSingleRuleID(t, dbPath)
 
-	// The panel replaced the email-keyed traffic row on upgrade or rename churn.
+	// The client was recreated under the same email with a new traffic row.
 	db := openBulkDB(t, dbPath)
 	execBulkSQL(t, db, `DELETE FROM client_traffics WHERE id=1`)
 	execBulkSQL(t, db, `
@@ -154,7 +154,7 @@ func TestReconcileRelinksPoliciesAfterTrafficRowReplaced(t *testing.T) {
 		t.Fatalf("override: %v", err)
 	}
 
-	// The panel replaced the email-keyed traffic row.
+	// The client was recreated under the same email with a new traffic row.
 	db := openBulkDB(t, dbPath)
 	execBulkSQL(t, db, `DELETE FROM client_traffics WHERE id=1`)
 	db.Close()
@@ -313,15 +313,15 @@ func TestReconcileRetiresDuplicateActivePolicyRows(t *testing.T) {
 	}
 }
 
-func TestReconcileKeepsActivePolicyBesideDisabledLegacyDuplicate(t *testing.T) {
+func TestReconcileKeepsActivePolicyBesideDisabledDuplicate(t *testing.T) {
 	ctx := context.Background()
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
 		{id: 1, inboundID: 1, enable: 1, email: "user@example.com", up: 100, down: 200},
 	})
 	defer st.Close()
 
-	// Legacy shape: an active exclude plus a disabled duplicate from an older
-	// inbound pointer, both for the same client row.
+	// An active exclude beside a disabled row recorded under another inbound
+	// pointer, both for the same traffic row.
 	db := openBulkDB(t, dbPath)
 	execBulkSQL(t, db, `INSERT INTO xui_factor_excludes(traffic_id, inbound_id, email, state, created_at, updated_at, activated_at)
 		VALUES(1, 1, 'user@example.com', 'active', 100, 100, 100)`)
@@ -364,8 +364,8 @@ func TestReconcileAdoptsDisabledDuplicateAtTargetTuple(t *testing.T) {
 	})
 	defer st.Close()
 
-	// The disabled legacy row already occupies the target (traffic, inbound,
-	// email) tuple, so reconciliation adopts it with the active row's note.
+	// The disabled row already holds the target (traffic, inbound, email)
+	// tuple, so reconcile reactivates it with the active row's note.
 	db := openBulkDB(t, dbPath)
 	execBulkSQL(t, db, `INSERT INTO xui_factor_excludes(traffic_id, inbound_id, email, state, note, created_at, updated_at, activated_at)
 		VALUES(1, 1, 'user@example.com', 'active', 'keep-me', 100, 100, 100)`)
@@ -443,7 +443,7 @@ func TestReconcileOrphansDisabledSingleRuleByDefault(t *testing.T) {
 	assertBulkCounters(t, dbPath, 1, 110, 220)
 }
 
-func TestReconcileConsolidatesCompatibleLegacyRulesIntoScope(t *testing.T) {
+func TestReconcileConsolidatesCompatibleSingleRulesIntoScope(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
@@ -535,19 +535,19 @@ func TestReconcileRealWorldMixedState(t *testing.T) {
 		t.Fatalf("create scope: %v", err)
 	}
 	scopeRuleID := firstScopeRuleID(t, dbPath)
-	insertBulkTraffic(t, dbPath, bulkTraffic{id: 4, inboundID: 1, enable: 1, email: "legacy1@example.com"})
-	insertBulkTraffic(t, dbPath, bulkTraffic{id: 5, inboundID: 1, enable: 1, email: "legacy2@example.com"})
+	insertBulkTraffic(t, dbPath, bulkTraffic{id: 4, inboundID: 1, enable: 1, email: "single1@example.com"})
+	insertBulkTraffic(t, dbPath, bulkTraffic{id: 5, inboundID: 1, enable: 1, email: "single2@example.com"})
 	insertBulkTraffic(t, dbPath, bulkTraffic{id: 6, inboundID: 1, enable: 0, email: "disabled@example.com"})
-	if _, err := svc.Enable(ctx, EnableRequest{Email: "legacy1@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
-		t.Fatalf("enable legacy1: %v", err)
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "single1@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable single1: %v", err)
 	}
-	if _, err := svc.Enable(ctx, EnableRequest{Email: "legacy2@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
-		t.Fatalf("enable legacy2: %v", err)
+	if _, err := svc.Enable(ctx, EnableRequest{Email: "single2@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
+		t.Fatalf("enable single2: %v", err)
 	}
 	if _, err := svc.Enable(ctx, EnableRequest{Email: "disabled@example.com", InboundID: &inboundID, Factor: "2"}); err != nil {
 		t.Fatalf("enable disabled: %v", err)
 	}
-	insertLegacyRuleWithoutClient(t, dbPath, "empty@example.com", 1, 2_000_000)
+	insertRuleWithoutClient(t, dbPath, "empty@example.com", 1, 2_000_000)
 
 	result, err := svc.Reconcile(ctx, ReconcileRequest{InboundID: &inboundID})
 	if err != nil {
@@ -594,7 +594,7 @@ func TestStatusHidesActiveSingleAlreadyOwnedByScope(t *testing.T) {
 	if _, err := svc.EnableAll(ctx, EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
 		t.Fatalf("enable all: %v", err)
 	}
-	insertLegacyRuleWithClient(t, dbPath, 1, "owned@example.com", 1, 2_000_000)
+	insertRuleWithClient(t, dbPath, 1, "owned@example.com", 1, 2_000_000)
 
 	rules, err := svc.Status(ctx, false)
 	if err != nil {
@@ -668,7 +668,7 @@ func TestCleanupPrunesOrphanedRulesAfterRetention(t *testing.T) {
 	}
 }
 
-func TestEnableAllOnceDoesNotConsolidateLegacySingles(t *testing.T) {
+func TestEnableAllOnceDoesNotConsolidateSingleRules(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
 	svc, st, dbPath := newBulkService(t, []bulkTraffic{
@@ -716,7 +716,7 @@ func setBulkEnable(t *testing.T, dbPath string, trafficID, enable int64) {
 	execBulkSQL(t, db, `UPDATE client_traffics SET enable=? WHERE id=?`, enable, trafficID)
 }
 
-func insertLegacyRuleWithoutClient(t *testing.T, dbPath, email string, inboundID, factorPPM int64) {
+func insertRuleWithoutClient(t *testing.T, dbPath, email string, inboundID, factorPPM int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
@@ -727,7 +727,7 @@ func insertLegacyRuleWithoutClient(t *testing.T, dbPath, email string, inboundID
 	`, inboundID, email, factorPPM, store.StateActive, now, now, now)
 }
 
-func insertLegacyRuleWithClient(t *testing.T, dbPath string, trafficID int64, email string, inboundID, factorPPM int64) {
+func insertRuleWithClient(t *testing.T, dbPath string, trafficID int64, email string, inboundID, factorPPM int64) {
 	t.Helper()
 	db := openBulkDB(t, dbPath)
 	defer db.Close()
@@ -737,11 +737,11 @@ func insertLegacyRuleWithClient(t *testing.T, dbPath string, trafficID int64, em
 		VALUES('', ?, ?, ?, ?, ?, ?, ?)
 	`, inboundID, email, factorPPM, store.StateActive, now, now, now)
 	if err != nil {
-		t.Fatalf("insert legacy rule: %v", err)
+		t.Fatalf("insert rule: %v", err)
 	}
 	ruleID, err := result.LastInsertId()
 	if err != nil {
-		t.Fatalf("legacy rule id: %v", err)
+		t.Fatalf("rule id: %v", err)
 	}
 	execBulkSQL(t, db, `
 		INSERT INTO xui_factor_rule_clients(

@@ -84,9 +84,8 @@ func ReconcileTx(ctx context.Context, tx *store.Tx, now int64, req ReconcileRequ
 	return result, nil
 }
 
-// reconcilePolicies moves active excludes and overrides onto the client's
-// current traffic row. 3x-ui 3.x replaces the email-keyed row on upgrade or
-// rename, which would otherwise silently drop the policy.
+// A client recreated under the same email gets a new traffic row; active
+// policies follow it there instead of silently ceasing to match.
 func reconcilePolicies(ctx context.Context, tx *store.Tx, req ReconcileRequest, now int64) (int, error) {
 	excludes, err := tx.ListActiveExcludes(ctx)
 	if err != nil {
@@ -188,8 +187,7 @@ func reconcileSingleRule(ctx context.Context, tx *store.Tx, rule store.Rule, sco
 	repaired := false
 	current, err := tx.ClientTrafficByID(ctx, rc.TrafficID)
 	if errors.Is(err, store.ErrNotFound) {
-		// 3x-ui 3.x replaces the email-keyed traffic row on upgrade or rename.
-		// Follow the email to the current row before declaring the rule dead.
+		// A client recreated under the same email has a new traffic row.
 		replacement, emailErr := tx.ClientTrafficByEmail(ctx, rc.Email)
 		if errors.Is(emailErr, store.ErrNotFound) {
 			if err := markRuleClientMissing(ctx, tx, rule.ID, rc, now, dryRun); err != nil {
@@ -321,8 +319,6 @@ func scopeMatchesClient(ctx context.Context, tx *store.Tx, scope store.Scope, ru
 		return false, nil
 	}
 	if scope.InboundID != nil {
-		// The scope selects clients through the authoritative inbound link, and
-		// only clients actually attached to that inbound may join it.
 		member, err := tx.ClientIsInboundMember(ctx, client.Email, *scope.InboundID)
 		if err != nil {
 			return false, err

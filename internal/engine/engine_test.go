@@ -169,7 +169,7 @@ func TestExcludeUpsertDoesNotDuplicateAcrossPointerDrift(t *testing.T) {
 	})
 	defer st.Close()
 
-	// A disabled row left behind by an older inbound pointer.
+	// A disabled row recorded under another inbound pointer.
 	db := openTestDB(t, dbPath)
 	execEngineTestSQL(t, db, `
 		INSERT INTO xui_factor_excludes(id, traffic_id, inbound_id, email, state, created_at, updated_at, activated_at)
@@ -693,7 +693,7 @@ func TestAuditFiltersAndTrafficImpactAggregation(t *testing.T) {
 	`, store.EventOverrideEnable, int64(1_700_000_010))
 	execEngineTestSQL(t, db, `
 		INSERT INTO xui_factor_events(rule_id, event_type, message, created_at)
-		VALUES(1, ?, 'traffic id 1 inbound 1 email user@example.com extra_up=100 extra_down=50 extra_all_time=150', ?)
+		VALUES(1, ?, 'traffic id 1 inbound 1 email user@example.com extra_up=100 extra_down=50', ?)
 	`, store.EventTrafficApply, int64(1_700_000_020))
 	execEngineTestSQL(t, db, `
 		INSERT INTO xui_factor_events(rule_id, event_type, message, created_at)

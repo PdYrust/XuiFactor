@@ -182,11 +182,8 @@ var migrationColumns = map[string][]migrationColumn{
 	},
 }
 
-// migrationPolicyDedupeStatements normalize policy rows written before the
-// inbound pointer stopped being part of the client identity. A client could
-// accumulate one active exclude or override per inbound pointer; keep the
-// latest row per client and disable the rest so policy stays unambiguous.
-// Placeholders receive the migration timestamp.
+// Policy decisions require at most one active exclude and override per client;
+// the newest row wins. Placeholders receive the migration timestamp.
 var migrationPolicyDedupeStatements = []string{
 	`UPDATE xui_factor_excludes
 		SET state = 'disabled', disabled_at = ?, updated_at = ?
@@ -213,10 +210,9 @@ type migrationColumn struct {
 	ddl  string
 }
 
-// migrationDropColumns removes metadata columns from earlier XuiFactor versions
-// that are no longer part of the schema. 3x-ui 3.x dropped the all_time counter
-// they were derived from, so the stored all-time baselines are dead weight.
-var migrationDropColumns = []struct {
+// Columns outside the current schema are dropped because their NOT NULL
+// constraints would reject inserts that omit them.
+var migrationObsoleteColumns = []struct {
 	table   string
 	columns []string
 }{

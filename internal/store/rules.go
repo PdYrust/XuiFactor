@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -203,6 +204,28 @@ func (tx *Tx) AddEvent(ctx context.Context, ruleID *int64, eventType, message st
 	return err
 }
 
+// AddEventOnce records an event unless the same rule already logged the same
+// message, so conditions re-checked every tick are audited once.
+func (tx *Tx) AddEventOnce(ctx context.Context, ruleID int64, eventType, message string, now int64) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1
+		FROM xui_factor_events
+		WHERE rule_id = ? AND event_type = ? AND message = ?
+		LIMIT 1
+	`, ruleID, eventType, message).Scan(&exists)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if err := tx.AddEvent(ctx, &ruleID, eventType, message, now); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) ListRules(ctx context.Context, includeDisabled bool) ([]Rule, error) {
 	excludesReady, err := s.tableExists(ctx, "xui_factor_excludes")
 	if err != nil {
@@ -386,18 +409,20 @@ func (s *Store) TrafficImpact(ctx context.Context, filter EventFilter) (TrafficI
 			createdAt := event.CreatedAt
 			impact.LastAppliedAt = &createdAt
 		}
-		extra, ok := eventExtraAllTime(event.Message)
+		extra, ok := eventExtraBytes(event.Message)
 		if !ok || extra <= 0 {
 			continue
 		}
-		const maxInt64 = int64(^uint64(0) >> 1)
-		if impact.ExtraBytes > maxInt64-extra {
-			impact.ExtraBytes = maxInt64
-			continue
-		}
-		impact.ExtraBytes += extra
+		impact.ExtraBytes = saturatingAdd(impact.ExtraBytes, extra)
 	}
 	return impact, nil
+}
+
+func saturatingAdd(a, b int64) int64 {
+	if b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
 }
 
 func eventMatchesFilter(event Event, filter EventFilter) bool {
@@ -442,20 +467,22 @@ func hydrateEventFromMessage(event *Event) {
 	}
 }
 
-func eventExtraAllTime(message string) (int64, bool) {
+func eventExtraBytes(message string) (int64, bool) {
+	var total int64
+	found := false
 	for _, field := range strings.Fields(message) {
-		clean := strings.Trim(field, " ,.;:")
-		if !strings.HasPrefix(clean, "extra_all_time=") {
+		key, value, ok := strings.Cut(strings.Trim(field, " ,.;:"), "=")
+		if !ok || (key != "extra_up" && key != "extra_down") {
 			continue
 		}
-		value := strings.TrimPrefix(clean, "extra_all_time=")
 		extra, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
+		if err != nil || extra < 0 {
 			return 0, false
 		}
-		return extra, true
+		total = saturatingAdd(total, extra)
+		found = true
 	}
-	return 0, false
+	return total, found
 }
 
 func scanRule(row *sql.Row) (Rule, error) {
@@ -510,31 +537,6 @@ func scanRuleRows(rows *sql.Rows) (Rule, error) {
 	return rule, nil
 }
 
-func scanRuleRowsWithCount(rows *sql.Rows) (Rule, error) {
-	var rule Rule
-	var activatedAt, pausedAt, disabledAt sql.NullInt64
-	if err := rows.Scan(
-		&rule.ID,
-		&rule.Name,
-		&rule.InboundID,
-		&rule.Email,
-		&rule.FactorPPM,
-		&rule.State,
-		&rule.CreatedAt,
-		&rule.UpdatedAt,
-		&activatedAt,
-		&pausedAt,
-		&disabledAt,
-		&rule.ClientCount,
-	); err != nil {
-		return Rule{}, err
-	}
-	rule.ActivatedAt = nullablePtr(activatedAt)
-	rule.PausedAt = nullablePtr(pausedAt)
-	rule.DisabledAt = nullablePtr(disabledAt)
-	return rule, nil
-}
-
 func nullablePtr(value sql.NullInt64) *int64 {
 	if !value.Valid {
 		return nil
@@ -548,18 +550,6 @@ func nullableInt64(value *int64) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: *value, Valid: true}
-}
-
-func IsNotFound(err error) bool {
-	return errors.Is(err, ErrNotFound)
-}
-
-func IsAmbiguous(err error) bool {
-	return errors.Is(err, ErrAmbiguous)
-}
-
-func IsConflict(err error) bool {
-	return errors.Is(err, ErrConflict)
 }
 
 func ConflictError(format string, args ...any) error {

@@ -79,12 +79,25 @@ func (tx *Tx) ListActiveRuleClients(ctx context.Context) ([]ActiveRuleClient, er
 }
 
 func (tx *Tx) ClientTrafficByID(ctx context.Context, trafficID int64) (ClientTraffic, error) {
+	return tx.clientTrafficByID(ctx, trafficID, "")
+}
+
+// LockClientTraffic reads a row before a counter update. The panel writes
+// PostgreSQL counters concurrently, so the row stays locked until commit; lock
+// rows in ascending id order, as the panel's traffic writer does.
+func (tx *Tx) LockClientTraffic(ctx context.Context, trafficID int64) (ClientTraffic, error) {
+	if tx.driver == DriverPostgres {
+		return tx.clientTrafficByID(ctx, trafficID, " FOR UPDATE")
+	}
+	return tx.clientTrafficByID(ctx, trafficID, "")
+}
+
+func (tx *Tx) clientTrafficByID(ctx context.Context, trafficID int64, lockClause string) (ClientTraffic, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT id, inbound_id, `+enableAsIntExpr(tx.driver)+`, email, up, down, total
 		FROM client_traffics
 		WHERE id = ?
-		LIMIT 1
-	`, trafficID)
+		LIMIT 1`+lockClause, trafficID)
 	var c ClientTraffic
 	if err := row.Scan(&c.ID, &c.InboundID, &c.Enable, &c.Email, &c.Up, &c.Down, &c.Total); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -142,11 +155,10 @@ func (tx *Tx) UpdateClientCountersCAS(ctx context.Context, current ClientTraffic
 		UPDATE client_traffics
 		SET up = ?, down = ?
 		WHERE id = ?
-			AND inbound_id = ?
 			AND email = ?
 			AND up = ?
 			AND down = ?
-	`, newUp, newDown, current.ID, current.InboundID, current.Email, current.Up, current.Down)
+	`, newUp, newDown, current.ID, current.Email, current.Up, current.Down)
 	if err != nil {
 		return false, err
 	}

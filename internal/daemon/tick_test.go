@@ -385,6 +385,33 @@ func TestUnexcludeResumesFromCurrentBaselineWithoutRetroactiveFactor(t *testing.
 	assertRuleClient(t, h.dbPath, 1, ruleClientState{lastUp: 130, lastDown: 260})
 }
 
+func TestUnexcludeBeforeAnyTickDoesNotFactorExcludedTraffic(t *testing.T) {
+	ctx := context.Background()
+	inboundID := int64(1)
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
+	defer h.store.Close()
+
+	if _, err := h.engine.EnableAll(ctx, engine.EnableAllRequest{Factor: "2", InboundID: &inboundID}); err != nil {
+		t.Fatalf("enable all: %v", err)
+	}
+	if _, err := h.engine.Exclude(ctx, engine.ExcludeRequest{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("exclude: %v", err)
+	}
+	setCounters(t, h.dbPath, 1, 110, 220)
+	if _, err := h.engine.Unexclude(ctx, engine.ExcludeSelector{Email: "user@example.com", InboundID: &inboundID}); err != nil {
+		t.Fatalf("unexclude: %v", err)
+	}
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if result.Applied != 0 {
+		t.Fatalf("applied = %d, want 0 for traffic from the excluded period", result.Applied)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220)
+}
+
 func TestOverrideClientUsesOverrideFactorWhenInboundScopeMatches(t *testing.T) {
 	ctx := context.Background()
 	inboundID := int64(1)
@@ -750,6 +777,17 @@ func TestScopeAutoEnrollConflictIsSkippedSafely(t *testing.T) {
 		t.Fatalf("scope skip events = %d, want 1", got)
 	}
 	assertCounters(t, h.dbPath, 2, 1000, 2000)
+
+	result, err = h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if result.EnrollSkipped != 0 || result.HasWork() {
+		t.Fatalf("second tick result = %#v, want no repeated skip", result)
+	}
+	if got := countEvents(t, h.dbPath, store.EventScopeSkip); got != 1 {
+		t.Fatalf("scope skip events after second tick = %d, want 1", got)
+	}
 }
 
 func TestConsolidatedClientDoesNotDoubleApplyOnNextTick(t *testing.T) {

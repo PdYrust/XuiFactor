@@ -7,120 +7,46 @@ import (
 	"strings"
 )
 
+// UpsertOverride reports whether an already active override changed.
 func (tx *Tx) UpsertOverride(ctx context.Context, policy OverridePolicy) (OverridePolicy, bool, error) {
-	existing, created, err := tx.findOverrideForUpsert(ctx, policy.TrafficID, policy.Email)
+	existing, found, err := tx.findOverrideForUpsert(ctx, policy.TrafficID, policy.Email)
 	if err != nil {
 		return OverridePolicy{}, false, err
 	}
-
-	if created {
-		_, err = tx.ExecContext(ctx, `
+	note := strings.TrimSpace(policy.Note)
+	if !found {
+		id, err := tx.insertReturningID(ctx, `
 			INSERT INTO xui_factor_overrides(
 				traffic_id, inbound_id, email, factor_ppm, state, note,
 				created_at, updated_at, activated_at, disabled_at
 			)
 			VALUES(?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)
-			ON CONFLICT(traffic_id, inbound_id, email) DO UPDATE SET
-				factor_ppm = excluded.factor_ppm,
-				state = excluded.state,
-				note = excluded.note,
-				updated_at = excluded.updated_at,
-				activated_at = excluded.activated_at,
-				disabled_at = NULL
-		`, policy.TrafficID, policy.InboundID, policy.Email, policy.FactorPPM, StateActive, strings.TrimSpace(policy.Note), policy.CreatedAt, policy.UpdatedAt, policy.ActivatedAt)
+		`, policy.TrafficID, policy.InboundID, policy.Email, policy.FactorPPM, StateActive, note, policy.CreatedAt, policy.UpdatedAt, policy.ActivatedAt)
 		if err != nil {
 			return OverridePolicy{}, false, err
 		}
-		updated, err := tx.FindOverrideForClient(ctx, policy.TrafficID, policy.Email)
-		if err != nil {
-			return OverridePolicy{}, false, err
-		}
-		return updated, false, nil
+		created, err := tx.FindOverrideByID(ctx, id)
+		return created, false, err
 	}
 
 	changed := existing.State == StateActive &&
-		(existing.FactorPPM != policy.FactorPPM || strings.TrimSpace(existing.Note) != strings.TrimSpace(policy.Note))
-
-	if existing.TrafficID != policy.TrafficID {
-		// The stored row points at a replaced traffic row; move it onto the
-		// current row for the same client instead of inserting a duplicate.
-		moved, err := tx.relinkOverride(ctx, existing.ID, policy)
-		if err != nil {
-			return OverridePolicy{}, false, err
-		}
-		if moved {
-			updated, err := tx.FindOverrideByID(ctx, existing.ID)
-			if err != nil {
-				return OverridePolicy{}, false, err
-			}
-			return updated, changed, nil
-		}
-		// Another row already targets the current traffic row; retire the stale
-		// one and update the current row instead.
-		if err := tx.DisableOverride(ctx, existing.ID, policy.UpdatedAt); err != nil {
-			return OverridePolicy{}, false, err
-		}
-		current, err := tx.FindOverrideForClient(ctx, policy.TrafficID, policy.Email)
-		if err != nil {
-			return OverridePolicy{}, false, err
-		}
-		if err := tx.updateOverrideFields(ctx, current.ID, policy); err != nil {
-			return OverridePolicy{}, false, err
-		}
-		updated, err := tx.FindOverrideByID(ctx, current.ID)
-		if err != nil {
-			return OverridePolicy{}, false, err
-		}
-		return updated, changed, nil
-	}
-
-	if err := tx.updateOverrideFields(ctx, existing.ID, policy); err != nil {
-		return OverridePolicy{}, false, err
-	}
-	updated, err := tx.FindOverrideByID(ctx, existing.ID)
-	if err != nil {
-		return OverridePolicy{}, false, err
-	}
-	return updated, changed, nil
-}
-
-func (tx *Tx) updateOverrideFields(ctx context.Context, id int64, policy OverridePolicy) error {
-	_, err := tx.ExecContext(ctx, `
-		UPDATE xui_factor_overrides
-		SET inbound_id = ?, factor_ppm = ?, state = ?, note = NULLIF(?, ''),
-			updated_at = ?, activated_at = ?, disabled_at = NULL
-		WHERE id = ?
-	`, policy.InboundID, policy.FactorPPM, StateActive, strings.TrimSpace(policy.Note), policy.UpdatedAt, policy.ActivatedAt, id)
-	return err
-}
-
-// relinkOverride moves a policy row onto the client's current traffic row. It
-// reports false when another row already targets that traffic row.
-func (tx *Tx) relinkOverride(ctx context.Context, id int64, policy OverridePolicy) (bool, error) {
-	result, err := tx.ExecContext(ctx, `
+		(existing.FactorPPM != policy.FactorPPM || strings.TrimSpace(existing.Note) != note)
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE xui_factor_overrides
 		SET traffic_id = ?, inbound_id = ?, factor_ppm = ?, state = ?, note = NULLIF(?, ''),
 			updated_at = ?, activated_at = ?, disabled_at = NULL
 		WHERE id = ?
-			AND NOT EXISTS (
-				SELECT 1 FROM xui_factor_overrides other
-				WHERE other.email = ? AND other.traffic_id = ? AND other.id <> ?
-			)
-	`, policy.TrafficID, policy.InboundID, policy.FactorPPM, StateActive, strings.TrimSpace(policy.Note), policy.UpdatedAt, policy.ActivatedAt, id, policy.Email, policy.TrafficID, id)
-	if err != nil {
-		return false, err
+	`, policy.TrafficID, policy.InboundID, policy.FactorPPM, StateActive, note, policy.UpdatedAt, policy.ActivatedAt, existing.ID); err != nil {
+		return OverridePolicy{}, false, err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return affected == 1, nil
+	updated, err := tx.FindOverrideByID(ctx, existing.ID)
+	return updated, changed, err
 }
 
-// RelinkOverrideRow moves an active override onto the given traffic row. When
-// another row already occupies the target (traffic row, inbound, email) tuple,
-// an active occupant keeps the policy and this row is retired, while an
-// inactive occupant is reactivated with this row's factor in its place.
+// RelinkOverrideRow moves an active override onto the given traffic row. If
+// another row already holds the target (traffic, inbound, email) tuple, an
+// active holder keeps the policy and this row is disabled; an inactive holder
+// is reactivated with this row's factor instead.
 func (tx *Tx) RelinkOverrideRow(ctx context.Context, policy OverridePolicy, current ClientTraffic, now int64) error {
 	var occupantID int64
 	var occupantState string
@@ -154,32 +80,31 @@ func (tx *Tx) RelinkOverrideRow(ctx context.Context, policy OverridePolicy, curr
 	return tx.DisableOverride(ctx, policy.ID, now)
 }
 
-// findOverrideForUpsert prefers an active row so reactivation can never leave
-// two active rows for one client; without one it falls back to the newest row,
-// including a stale row that still points at a replaced traffic row.
+// findOverrideForUpsert follows the same preference order as
+// findExcludeForUpsert.
 func (tx *Tx) findOverrideForUpsert(ctx context.Context, trafficID int64, email string) (OverridePolicy, bool, error) {
 	existing, err := tx.FindActiveOverrideForClient(ctx, trafficID, email)
 	if err == nil {
-		return existing, false, nil
+		return existing, true, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return OverridePolicy{}, false, err
 	}
 	existing, err = tx.FindOverrideForClient(ctx, trafficID, email)
 	if err == nil {
-		return existing, false, nil
+		return existing, true, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return OverridePolicy{}, false, err
 	}
 	existing, err = tx.FindOverrideByEmail(ctx, email)
 	if errors.Is(err, ErrNotFound) {
-		return OverridePolicy{}, true, nil
+		return OverridePolicy{}, false, nil
 	}
 	if err != nil {
 		return OverridePolicy{}, false, err
 	}
-	return existing, false, nil
+	return existing, true, nil
 }
 
 func (tx *Tx) DisableOverride(ctx context.Context, id, now int64) error {
@@ -226,9 +151,6 @@ func (tx *Tx) FindOverrideForClient(ctx context.Context, trafficID int64, email 
 	return scanOverride(row)
 }
 
-// FindOverrideByEmail reports the newest override row for a client regardless
-// of the stored traffic row, which may point at a replaced row after a 3.x
-// panel upgrade or client rename.
 func (tx *Tx) FindOverrideByEmail(ctx context.Context, email string) (OverridePolicy, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT id, traffic_id, inbound_id, email, factor_ppm, state, COALESCE(note, ''),
@@ -284,9 +206,7 @@ func (s *Store) ListOverrides(ctx context.Context, includeInactive bool, inbound
 	where := make([]string, 0, 2)
 	args := make([]any, 0, 3)
 	if inboundID != nil {
-		// Resolve the inbound through the authoritative clients/client_inbounds
-		// link; fall back to the stored pointer only for clients whose traffic
-		// row is gone.
+		// Policies whose traffic row is gone fall back to the stored inbound.
 		query += `
 		LEFT JOIN client_traffics ct ON ct.id = ov.traffic_id AND ct.email = ov.email`
 	}

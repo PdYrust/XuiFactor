@@ -328,7 +328,7 @@ func TestValidateSchemaRejectsMissingColumn(t *testing.T) {
 	}
 }
 
-func TestValidateSchemaRejectsLegacyAllTimeSchema(t *testing.T) {
+func TestValidateSchemaRejectsPanelWithAllTimeCounter(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createTestSchema(t, dbPath)
@@ -352,11 +352,11 @@ func TestValidateSchemaRejectsLegacyAllTimeSchema(t *testing.T) {
 		t.Fatalf("expected ErrSchema, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "all_time") || !strings.Contains(err.Error(), "upgrade 3x-ui") {
-		t.Fatalf("expected legacy schema upgrade hint, got %v", err)
+		t.Fatalf("expected panel upgrade hint, got %v", err)
 	}
 }
 
-func TestMigrateDedupesLegacyActivePoliciesByIdentity(t *testing.T) {
+func TestMigrateKeepsOneActivePolicyPerClient(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
 	createTestSchema(t, dbPath)

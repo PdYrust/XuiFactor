@@ -71,42 +71,62 @@ func Defaults() Config {
 	}
 }
 
-// panelEnvFilePaths lists the service environment files 3x-ui writes its
-// database settings into, covering the distro layouts the panel supports:
-// Debian/Ubuntu use /etc/default, Arch /etc/conf.d, RHEL /etc/sysconfig.
+// The panel's service environment file on Debian, Arch, and RHEL layouts.
 var panelEnvFilePaths = []string{
 	"/etc/default/x-ui",
 	"/etc/conf.d/x-ui",
 	"/etc/sysconfig/x-ui",
 }
 
-// applyDatabaseEnv fills database settings from the environment when the
-// config file leaves them unset. Process environment variables win over the
-// panel service environment files (x-ui reads the same variables).
+// applyDatabaseEnv resolves an auto backend the way the panel does: only
+// XUI_DB_TYPE selects PostgreSQL, and XUI_DB_DSN then supplies the connection.
+// A DSN in the config file keeps precedence, and the process environment wins
+// over the panel environment file.
 func applyDatabaseEnv(cfg *Config) {
-	panelValues := readPanelEnvValues(panelEnvFilePaths)
+	var panelValues map[string]string
 	lookup := func(key string) string {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}
+		if panelValues == nil {
+			panelValues = readPanelEnvValues(panelEnvFilePaths)
+		}
 		return panelValues[key]
 	}
-	backend := strings.ToLower(strings.TrimSpace(cfg.DatabaseBackend))
-	if backend == "" || backend == BackendAuto {
-		if value := lookup("XUI_DB_TYPE"); value != "" {
-			cfg.DatabaseBackend = value
+	backend, _ := normalizeBackend(cfg.DatabaseBackend)
+	switch backend {
+	case BackendSQLite:
+		return
+	case BackendPostgres:
+		if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+			cfg.DatabaseDSN = lookup("XUI_DB_DSN")
 		}
+		return
 	}
-	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
-		if value := lookup("XUI_DB_DSN"); value != "" {
-			cfg.DatabaseDSN = value
-		}
+	if strings.TrimSpace(cfg.DatabaseDSN) != "" {
+		return
+	}
+	if kind, _ := normalizeBackend(lookup("XUI_DB_TYPE")); kind == BackendPostgres {
+		cfg.DatabaseBackend = BackendPostgres
+		cfg.DatabaseDSN = lookup("XUI_DB_DSN")
 	}
 }
 
-// readPanelEnvValues extracts XUI_DB_TYPE and XUI_DB_DSN from 3x-ui style
-// KEY=VALUE environment files. Missing files are skipped and the first value
-// found for a key wins.
+func normalizeBackend(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", BackendAuto:
+		return BackendAuto, true
+	case BackendSQLite:
+		return BackendSQLite, true
+	case BackendPostgres, "postgresql", "pg":
+		return BackendPostgres, true
+	default:
+		return "", false
+	}
+}
+
+// readPanelEnvValues extracts XUI_DB_TYPE and XUI_DB_DSN from KEY=VALUE
+// environment files. Missing files are skipped and the first value wins.
 func readPanelEnvValues(paths []string) map[string]string {
 	values := make(map[string]string, 2)
 	for _, path := range paths {
@@ -146,14 +166,12 @@ func readPanelEnvValues(paths []string) map[string]string {
 	return values
 }
 
-// ResolvedBackend picks the database backend: the configured value wins, then
-// a configured DSN implies postgres, and sqlite is the fallback.
+// ResolvedBackend applies an explicit backend first; on auto a DSN selects
+// PostgreSQL.
 func (c Config) ResolvedBackend() string {
-	switch strings.ToLower(strings.TrimSpace(c.DatabaseBackend)) {
-	case BackendSQLite:
-		return BackendSQLite
-	case BackendPostgres, "postgresql", "pg":
-		return BackendPostgres
+	switch backend, _ := normalizeBackend(c.DatabaseBackend); backend {
+	case BackendSQLite, BackendPostgres:
+		return backend
 	}
 	if strings.TrimSpace(c.DatabaseDSN) != "" {
 		return BackendPostgres
@@ -161,8 +179,7 @@ func (c Config) ResolvedBackend() string {
 	return BackendSQLite
 }
 
-// DatabaseLabel is the operator-facing database identifier with any password
-// removed, safe to print in command output.
+// DatabaseLabel identifies the database for command output without the password.
 func (c Config) DatabaseLabel() string {
 	if c.ResolvedBackend() == BackendPostgres {
 		return RedactDSN(c.DatabaseDSN)
@@ -175,7 +192,7 @@ func RedactDSN(dsn string) string {
 	if dsn == "" {
 		return ""
 	}
-	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" && u.Host != "" {
+	if u, err := url.Parse(dsn); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
 		if _, hasPassword := u.User.Password(); hasPassword {
 			u.User = url.UserPassword(u.User.Username(), "REDACTED")
 		}
@@ -218,8 +235,12 @@ func Load(path string) (Config, error) {
 	if strings.TrimSpace(raw.DatabasePath) != "" {
 		cfg.DatabasePath = strings.TrimSpace(raw.DatabasePath)
 	}
-	if strings.TrimSpace(raw.DatabaseBackend) != "" {
-		cfg.DatabaseBackend = strings.TrimSpace(raw.DatabaseBackend)
+	if value := strings.TrimSpace(raw.DatabaseBackend); value != "" {
+		backend, ok := normalizeBackend(value)
+		if !ok {
+			return Config{}, fmt.Errorf("invalid database_backend %q: use auto, sqlite, or postgres", value)
+		}
+		cfg.DatabaseBackend = backend
 	}
 	if strings.TrimSpace(raw.DatabaseDSN) != "" {
 		cfg.DatabaseDSN = strings.TrimSpace(raw.DatabaseDSN)
@@ -280,6 +301,9 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if _, ok := normalizeBackend(c.DatabaseBackend); !ok {
+		return fmt.Errorf("invalid database_backend %q: use auto, sqlite, or postgres", c.DatabaseBackend)
+	}
 	switch c.ResolvedBackend() {
 	case BackendPostgres:
 		if strings.TrimSpace(c.DatabaseDSN) == "" {

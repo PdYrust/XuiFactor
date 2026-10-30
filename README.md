@@ -29,8 +29,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.5.0-beta_linux_amd64.tar.gz
-cd xui-factor_v0.5.0-beta_linux_amd64
+tar -xzf xui-factor_v0.5.1-beta_linux_amd64.tar.gz
+cd xui-factor_v0.5.1-beta_linux_amd64
 sudo ./scripts/install.sh
 ```
 
@@ -53,7 +53,7 @@ database: /etc/x-ui/x-ui.db (SQLite) or the panel PostgreSQL DSN
 service: xui-factor.service
 ```
 
-Point XuiFactor at a PostgreSQL panel with `database_backend` and `database_dsn` in the config file, or leave the defaults: the daemon and one-off commands read `XUI_DB_TYPE` and `XUI_DB_DSN` from the panel service environment file (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`). See [docs/OPERATIONS.md](docs/OPERATIONS.md) for backend configuration and migration order.
+Point XuiFactor at a PostgreSQL panel with `database_backend` and `database_dsn` in the config file, or leave the defaults: like the panel itself, XuiFactor uses PostgreSQL when `XUI_DB_TYPE` selects it and connects with `XUI_DB_DSN`, read from the environment or the panel service environment file (`/etc/default/x-ui`, `/etc/conf.d/x-ui`, or `/etc/sysconfig/x-ui`). See [docs/OPERATIONS.md](docs/OPERATIONS.md) for backend configuration and upgrade order.
 
 ## Common Commands
 
@@ -105,7 +105,7 @@ xui-factor enable-all --factor 1.2
 
 When possible, persistent `enable-all` also consolidates compatible active single-user rules into the scope while preserving their baselines.
 
-Use `xui-factor reconcile` to repair older metadata after upgrades. Normal status shows only effective active or paused rules; reconciled legacy rules are available through `status --all` until cleanup prunes them after retention.
+Use `xui-factor reconcile` to repair rule and policy metadata after panel upgrades or client changes. Normal status shows only effective active or paused rules; rules retired by reconcile stay visible through `status --all` until cleanup prunes them after retention.
 
 Apply a factor only to limited clients:
 
@@ -148,7 +148,7 @@ Use `xui-factor report` for a concise policy, effective client, service, and tra
 
 XuiFactor keeps its own metadata bounded with automatic cleanup enabled by default. Missing client tracking is pruned after 30 seconds, disabled rules after 7 days, and audit events after 30 days.
 
-Use `xui-factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata, including orphaned legacy rules after retention, and never modifies 3x-ui counters. SQLite `VACUUM` runs only when explicitly requested with `xui-factor cleanup --vacuum`.
+Use `xui-factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata, including orphaned rules after retention, and never modifies 3x-ui counters. `VACUUM` runs only when explicitly requested with `xui-factor cleanup --vacuum`.
 
 ## Safety Notes
 
@@ -167,7 +167,7 @@ sudo ./scripts/uninstall.sh
 sudo ./scripts/uninstall.sh --purge
 ```
 
-Uninstall does not remove `/etc/x-ui/x-ui.db`.
+Uninstall does not remove `/etc/x-ui/x-ui.db` or touch a PostgreSQL panel database.
 
 ## Project
 

@@ -175,6 +175,8 @@ verify-installers:
 		test -f "$$root/etc/xui-factor/config.json"; \
 		test -f "$$root/etc/systemd/system/xui-factor.service"; \
 		grep -Fqx "ExecStart=/usr/local/bin/xui-factor --config /etc/xui-factor/config.json run" "$$root/etc/systemd/system/xui-factor.service"; \
+		cmp "$$pkg/systemd/xui-factor.service" "$$root/etc/systemd/system/xui-factor.service"; \
+		test "$$(stat -c %a "$$root/etc/xui-factor/config.json")" = "600"; \
 		if [ "$$arch" = "$$host_arch" ]; then \
 			"$$root/usr/local/bin/$(APP)" --version >/dev/null; \
 			"$$root/usr/local/bin/$(APP)" --help >/dev/null; \

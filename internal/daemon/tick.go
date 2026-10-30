@@ -246,11 +246,15 @@ func (r *Runner) reconcileScopes(ctx context.Context, tx *store.Tx, now int64) (
 
 			conflict, err := tx.ActiveRuleForTrafficExcept(ctx, client.ID, scope.RuleID)
 			if err == nil {
+				// The conflict persists across ticks; audit and count it once.
 				message := fmt.Sprintf("traffic id %d skipped; active rule %d already targets it", client.ID, conflict.ID)
-				if err := tx.AddEvent(ctx, &scope.RuleID, store.EventScopeSkip, message, now); err != nil {
+				recorded, err := tx.AddEventOnce(ctx, scope.RuleID, store.EventScopeSkip, message, now)
+				if err != nil {
 					return 0, 0, err
 				}
-				skipped++
+				if recorded {
+					skipped++
+				}
 				continue
 			}
 			if !errors.Is(err, store.ErrNotFound) {
@@ -286,7 +290,7 @@ type targetResult struct {
 }
 
 func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.ActiveRuleClient, now int64) (targetResult, error) {
-	current, err := tx.ClientTrafficByID(ctx, target.Client.TrafficID)
+	current, err := tx.LockClientTraffic(ctx, target.Client.TrafficID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return r.markMissing(ctx, tx, target, now)
@@ -368,11 +372,6 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	if err != nil {
 		return targetResult{}, err
 	}
-	extraTotal, err := safeAdd(extraUp, extraDown)
-	if err != nil {
-		return targetResult{}, err
-	}
-
 	if r.beforeCounterUpdate != nil {
 		if err := r.beforeCounterUpdate(ctx, tx, target, current); err != nil {
 			return targetResult{}, err
@@ -398,9 +397,7 @@ func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.Acti
 	}); err != nil {
 		return targetResult{}, err
 	}
-	// extra_all_time is the historical field name; it carries the total factored
-	// bytes so report aggregation stays compatible across releases.
-	message := fmt.Sprintf("traffic id %d inbound %d email %s extra_up=%d extra_down=%d extra_all_time=%d", target.Client.TrafficID, target.Client.InboundID, target.Client.Email, extraUp, extraDown, extraTotal)
+	message := fmt.Sprintf("traffic id %d inbound %d email %s extra_up=%d extra_down=%d", target.Client.TrafficID, target.Client.InboundID, target.Client.Email, extraUp, extraDown)
 	if err := tx.AddEvent(ctx, &target.Rule.ID, store.EventTrafficApply, message, now); err != nil {
 		return targetResult{}, err
 	}
@@ -443,17 +440,6 @@ func baseline(target store.ActiveRuleClient, current store.ClientTraffic, remUp,
 	}
 }
 
-func rejectDuplicateTargets(targets []store.ActiveRuleClient) error {
-	seen := make(map[int64]int64, len(targets))
-	for _, target := range targets {
-		if ruleID, ok := seen[target.Client.TrafficID]; ok {
-			return store.ConflictError("active rules %d and %d both target traffic id %d", ruleID, target.Rule.ID, target.Client.TrafficID)
-		}
-		seen[target.Client.TrafficID] = target.Rule.ID
-	}
-	return nil
-}
-
 func calculateExtra(delta, factorExtra, remainder int64) (int64, int64, error) {
 	if delta < 0 || factorExtra < 0 || remainder < 0 {
 		return 0, 0, errors.New("invalid factor input")
@@ -465,7 +451,7 @@ func calculateExtra(delta, factorExtra, remainder int64) (int64, int64, error) {
 	quotient := new(big.Int)
 	modulo := new(big.Int)
 	quotient.QuoRem(value, scale, modulo)
-	if !quotient.IsInt64() || quotient.Int64() > math.MaxInt64 {
+	if !quotient.IsInt64() {
 		return 0, 0, errors.New("factor result overflow")
 	}
 	return quotient.Int64(), modulo.Int64(), nil

@@ -214,6 +214,52 @@ func TestReadPanelEnvValues(t *testing.T) {
 	}
 }
 
+func TestAutoBackendFollowsPanelDatabaseType(t *testing.T) {
+	original := panelEnvFilePaths
+	panelEnvFilePaths = nil
+	t.Cleanup(func() { panelEnvFilePaths = original })
+
+	t.Setenv("XUI_DB_TYPE", "")
+	t.Setenv("XUI_DB_DSN", "postgres://leftover@127.0.0.1/xui")
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ResolvedBackend() != BackendSQLite {
+		t.Fatalf("XUI_DB_DSN without XUI_DB_TYPE selected %s, want sqlite", cfg.ResolvedBackend())
+	}
+
+	t.Setenv("XUI_DB_TYPE", "sqlite")
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"database_dsn":"postgres://file@127.0.0.1/xui"}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.ResolvedBackend() != BackendPostgres || cfg.DatabaseDSN != "postgres://file@127.0.0.1/xui" {
+		t.Fatalf("config file DSN lost to the environment: backend=%s dsn=%q", cfg.ResolvedBackend(), cfg.DatabaseDSN)
+	}
+}
+
+func TestInvalidDatabaseBackendIsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"database_backend":"postgress"}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "invalid database_backend") {
+		t.Fatalf("expected invalid database_backend error, got %v", err)
+	}
+}
+
+func TestRedactDSNWithoutHost(t *testing.T) {
+	redacted := RedactDSN("postgres://xui:secret@/x-ui?host=/var/run/postgresql")
+	if strings.Contains(redacted, "secret") || !strings.Contains(redacted, "xui:REDACTED@") {
+		t.Fatalf("hostless dsn not redacted: %s", redacted)
+	}
+}
+
 func TestDatabaseLabelRedactsDSN(t *testing.T) {
 	cfg := Defaults()
 	cfg.DatabaseBackend = BackendPostgres

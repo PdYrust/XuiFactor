@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Share sanitized details only. Do not paste UUIDs, tokens, private keys, domain secrets, or full database files.
+        Share sanitized details only. Do not paste UUIDs, tokens, private keys, domain secrets, database passwords, or full database files.
   - type: textarea
     id: summary
     attributes:
@@ -26,11 +26,12 @@ body:
     id: environment
     attributes:
       label: Server environment
-      description: Include OS, architecture, 3x-ui version if available, install method, and service state.
+      description: Include OS, architecture, 3x-ui version if available, database backend, install method, and service state.
       placeholder: |
         OS: Debian 12
         architecture: linux_arm64
         3x-ui version: unknown
+        database backend: postgres
         service: active
     validations:
       required: true
@@ -38,7 +39,7 @@ body:
     id: config
     attributes:
       label: Sanitized config details
-      description: Include paths and relevant settings only. Redact sensitive values.
+      description: Include paths and relevant settings only. Redact sensitive values such as the password in database_dsn.
       render: json
     validations:
       required: true

@@ -1134,7 +1134,11 @@ func (a *App) runBackup(ctx context.Context, opts commonOptions, args []string) 
 	out.Field("path", path)
 	out.Section("Restore")
 	out.Field("mode", "manual only")
-	out.Field("hint", "stop x-ui and xui-factor before replacing the database")
+	if cfg.ResolvedBackend() == config.BackendPostgres {
+		out.Field("hint", "stop x-ui and xui-factor, then restore with pg_restore")
+	} else {
+		out.Field("hint", "stop x-ui and xui-factor before replacing the database")
+	}
 	return 0
 }
 
@@ -1276,8 +1280,7 @@ func loadConfig(opts commonOptions) (config.Config, error) {
 		return config.Config{}, err
 	}
 	if strings.TrimSpace(opts.databasePath) != "" {
-		// The flag names a SQLite database file, so it selects that backend
-		// even when the config file points at PostgreSQL.
+		// --database names a SQLite file, so it also overrides a PostgreSQL config.
 		cfg.DatabasePath = strings.TrimSpace(opts.databasePath)
 		cfg.DatabaseBackend = config.BackendSQLite
 	}
@@ -1471,13 +1474,16 @@ func (a *App) openReadOnlyService(ctx context.Context, opts commonOptions) (*eng
 }
 
 func openConfiguredStore(ctx context.Context, cfg config.Config, readOnly bool) (*store.Store, error) {
-	if cfg.ResolvedBackend() == config.BackendPostgres {
+	switch {
+	case cfg.ResolvedBackend() == config.BackendPostgres && readOnly:
+		return store.OpenPostgresReadOnly(ctx, cfg.DatabaseDSN, cfg.BusyTimeout)
+	case cfg.ResolvedBackend() == config.BackendPostgres:
 		return store.OpenPostgres(ctx, cfg.DatabaseDSN, cfg.BusyTimeout)
-	}
-	if readOnly {
+	case readOnly:
 		return store.OpenReadOnly(ctx, cfg.DatabasePath, cfg.BusyTimeout)
+	default:
+		return store.Open(ctx, cfg.DatabasePath, cfg.BusyTimeout)
 	}
-	return store.Open(ctx, cfg.DatabasePath, cfg.BusyTimeout)
 }
 
 func requireWritableDatabase(cfg config.Config) error {
@@ -2311,33 +2317,6 @@ func commandErrorCode(err error) int {
 	return 1
 }
 
-func printRule(w io.Writer, rule store.Rule) {
-	name := ""
-	if rule.Name != "" {
-		name = " name=" + rule.Name
-	}
-	if rule.Scope != nil {
-		fmt.Fprintf(w, "rule=%d state=%s scope=%s factor=%s clients=%d%s\n",
-			rule.ID,
-			rule.State,
-			store.ScopeDescription(rule.Scope),
-			engine.FormatFactor(rule.FactorPPM),
-			rule.ClientCount,
-			name,
-		)
-		return
-	}
-	fmt.Fprintf(w, "rule=%d state=%s email=%s inbound=%d factor=%s clients=%d%s\n",
-		rule.ID,
-		rule.State,
-		rule.Email,
-		rule.InboundID,
-		engine.FormatFactor(rule.FactorPPM),
-		rule.ClientCount,
-		name,
-	)
-}
-
 func (a *App) printError(err error) {
 	fmt.Fprintf(a.Err, "error: %v\n", err)
 }
@@ -2392,9 +2371,9 @@ Commands:
   resume-all Resume paused rules from current counters
   report     Show concise management report
   audit      Show lifecycle events
-  backup     Create a timestamped SQLite backup
+  backup     Create a timestamped database backup
   cleanup    Prune stale XuiFactor metadata
-  reconcile  Reconcile ineffective legacy rules
+  reconcile  Repair ineffective rules and policies
   tick       Apply one factor tick and exit
   run        Start the factor sidecar
 
@@ -2428,8 +2407,6 @@ const helpExamples = `  xui-factor enable --email user@example.com --factor 1.2
   xui-factor tick
   xui-factor run`
 
-// printUsage writes the short reference shown for bare invocations and
-// command errors; command examples live in the full help only.
 func (a *App) printUsage(w io.Writer) {
 	fmt.Fprintf(w, "%s\n\n%s\n\nRun \"%s --help\" for command examples.\n", displayName, usageCore, appName)
 }

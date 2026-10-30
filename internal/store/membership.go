@@ -6,10 +6,9 @@ import (
 	"errors"
 )
 
-// clientInboundMembership matches a client by inbound attachment through the
-// authoritative 3x-ui 3.x link (clients + client_inbounds). client_traffics
-// carries one shared row per email and its inbound_id is a stale-prone legacy
-// pointer, so membership never reads that column.
+// Inbound attachment lives in client_inbounds. client_traffics keeps one row
+// per email whose inbound_id only names one of the attached inbounds, so it
+// is never used for membership.
 func clientInboundMembership(emailExpr string) string {
 	return `EXISTS (
 			SELECT 1 FROM clients c
@@ -36,9 +35,6 @@ func (tx *Tx) ClientIsInboundMember(ctx context.Context, email string, inboundID
 	return true, nil
 }
 
-// AdoptRuleClientInbound records the live inbound pointer on a rule client.
-// On 3x-ui 3.x a client can be attached to several inbounds and the pointer
-// moves between them, so drift is informational rather than an identity change.
 func (tx *Tx) AdoptRuleClientInbound(ctx context.Context, ruleID, trafficID, inboundID, now int64) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE xui_factor_rule_clients
@@ -66,10 +62,6 @@ func (tx *Tx) ClientTrafficByEmail(ctx context.Context, email string) (ClientTra
 	return c, nil
 }
 
-// RelinkRuleClientByEmail re-points a rule client at the current traffic row
-// for its email. 3x-ui 3.x keeps one shared row per email: an upgrade or a
-// client rename replaces the row, so a rule whose stored traffic id vanished
-// is dead until it follows the email.
 func (tx *Tx) RelinkRuleClientByEmail(ctx context.Context, ruleID, trafficID, now int64) (RuleClient, error) {
 	rc, err := tx.RuleClient(ctx, ruleID, trafficID)
 	if err != nil {

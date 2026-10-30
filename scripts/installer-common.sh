@@ -140,7 +140,7 @@ install_default_config() {
 		info "preserved existing config at $CONFIG_FILE"
 		return
 	fi
-	install -m 0644 "$pkg/config/config.json" "$config_file"
+	install -m 0600 "$pkg/config/config.json" "$config_file"
 	info "created default config at $CONFIG_FILE"
 }
 

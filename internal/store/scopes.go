@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -482,28 +481,4 @@ func boolInt(value bool) int64 {
 		return 1
 	}
 	return 0
-}
-
-func ScopeDescription(scope *Scope) string {
-	if scope == nil {
-		return ""
-	}
-	parts := make([]string, 0, 4)
-	if scope.Once {
-		parts = append(parts, "snapshot")
-	} else {
-		parts = append(parts, "persistent")
-	}
-	if scope.InboundID == nil {
-		parts = append(parts, "all-enabled")
-	} else {
-		parts = append(parts, fmt.Sprintf("inbound=%d", *scope.InboundID))
-	}
-	if scope.LimitedOnly {
-		parts = append(parts, "limited-only")
-	}
-	if scope.IncludeDisabledClients {
-		parts = append(parts, "include-disabled")
-	}
-	return strings.Join(parts, ",")
 }

@@ -453,7 +453,3 @@ func rejectDuplicateClientIDs(clients []store.ClientTraffic) error {
 	}
 	return nil
 }
-
-func IsNoMatch(err error) bool {
-	return errors.Is(err, store.ErrNotFound)
-}

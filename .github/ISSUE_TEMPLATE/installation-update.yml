@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do not paste sensitive data such as UUIDs, tokens, private keys, domain secrets, or full database files.
+        Do not paste sensitive data such as UUIDs, tokens, private keys, domain secrets, database passwords, or full database files.
   - type: textarea
     id: summary
     attributes:
@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: XuiFactor version
-      placeholder: 0.5.0-beta
+      placeholder: 0.5.1-beta
     validations:
       required: true
   - type: dropdown

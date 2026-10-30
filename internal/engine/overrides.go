@@ -95,7 +95,7 @@ func (s *Service) RemoveOverride(ctx context.Context, selector OverrideSelector)
 		}
 		policy, err = tx.FindActiveOverrideForClient(ctx, client.ID, client.Email)
 		if errors.Is(err, store.ErrNotFound) {
-			// The stored row may still point at a replaced traffic row.
+			// The policy may still reference a replaced traffic row.
 			policy, err = tx.FindActiveOverrideByEmail(ctx, client.Email)
 		}
 		if err != nil {
