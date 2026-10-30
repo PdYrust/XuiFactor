@@ -82,14 +82,24 @@ func (tx *Tx) ClientTrafficByID(ctx context.Context, trafficID int64) (ClientTra
 	return tx.clientTrafficByID(ctx, trafficID, "")
 }
 
-// LockClientTraffic reads a row before a counter update. The panel writes
-// PostgreSQL counters concurrently, so the row stays locked until commit; lock
-// rows in ascending id order, as the panel's traffic writer does.
+// LockClientTraffic reads a row before a counter update and keeps it locked
+// until commit. On PostgreSQL the panel writes counters from several jobs that
+// lock rows in their own order (local traffic, node sync), so waiting on a row
+// could deadlock with them. A row the panel holds is reported as ErrLocked
+// instead; its baseline stays put and the next tick factors the full delta.
+// SQLite write transactions already exclude every other writer.
 func (tx *Tx) LockClientTraffic(ctx context.Context, trafficID int64) (ClientTraffic, error) {
-	if tx.driver == DriverPostgres {
-		return tx.clientTrafficByID(ctx, trafficID, " FOR UPDATE")
+	if tx.driver != DriverPostgres {
+		return tx.clientTrafficByID(ctx, trafficID, "")
 	}
-	return tx.clientTrafficByID(ctx, trafficID, "")
+	current, err := tx.clientTrafficByID(ctx, trafficID, " FOR UPDATE SKIP LOCKED")
+	if !errors.Is(err, ErrNotFound) {
+		return current, err
+	}
+	if _, err := tx.clientTrafficByID(ctx, trafficID, ""); err != nil {
+		return ClientTraffic{}, err
+	}
+	return ClientTraffic{}, ErrLocked
 }
 
 func (tx *Tx) clientTrafficByID(ctx context.Context, trafficID int64, lockClause string) (ClientTraffic, error) {

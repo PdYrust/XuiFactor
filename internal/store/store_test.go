@@ -558,6 +558,47 @@ func TestBackupDoesNotOverwriteExistingPathAndIsUsable(t *testing.T) {
 	}
 }
 
+func TestPanelRoleDetectsMasterAndManagedPanel(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	createTestSchema(t, dbPath)
+	st, err := Open(ctx, dbPath, time.Second)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	now := time.Unix(1_700_000_000, 0)
+
+	role, err := st.PanelRole(ctx, now)
+	if err != nil {
+		t.Fatalf("panel role without node tables: %v", err)
+	}
+	if role.Name() != "standalone" {
+		t.Fatalf("role = %#v, want standalone", role)
+	}
+
+	execTestSQL(t, st.db, `CREATE TABLE nodes (id INTEGER PRIMARY KEY, enable numeric)`)
+	execTestSQL(t, st.db, `INSERT INTO nodes(id, enable) VALUES(1, 1), (2, 1), (3, 0)`)
+	execTestSQL(t, st.db, `CREATE TABLE client_global_traffics (id INTEGER PRIMARY KEY, email TEXT, updated_at INTEGER)`)
+	execTestSQL(t, st.db, `INSERT INTO client_global_traffics(email, updated_at) VALUES('user@example.com', ?)`, now.Add(-25*time.Hour).UnixMilli())
+	role, err = st.PanelRole(ctx, now)
+	if err != nil {
+		t.Fatalf("panel role on a master: %v", err)
+	}
+	if role.Name() != "master" || role.Nodes != 2 {
+		t.Fatalf("role = %#v, want master with 2 enabled nodes and stale master usage ignored", role)
+	}
+
+	execTestSQL(t, st.db, `UPDATE client_global_traffics SET updated_at = ?`, now.Add(-time.Minute).UnixMilli())
+	role, err = st.PanelRole(ctx, now)
+	if err != nil {
+		t.Fatalf("panel role on a managed panel: %v", err)
+	}
+	if role.Name() != "node" || !role.Managed {
+		t.Fatalf("role = %#v, want a managed node", role)
+	}
+}
+
 func createTestSchema(t *testing.T, dbPath string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", dbPath)

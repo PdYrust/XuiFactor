@@ -31,6 +31,8 @@ var postgresTestTables = []string{
 	"xui_factor_overrides",
 	"xui_factor_events",
 	"xui_factor_meta",
+	"nodes",
+	"client_global_traffics",
 }
 
 func requirePostgresDSN(t *testing.T) string {
@@ -530,6 +532,37 @@ func TestPostgresWriteProbe(t *testing.T) {
 	}
 	if leftover != "" {
 		t.Fatalf("probe table left behind: %s", leftover)
+	}
+}
+
+func TestPostgresPanelRole(t *testing.T) {
+	st, ctx := openPostgresTestStore(t)
+	for _, statement := range []string{
+		`CREATE TABLE nodes (id BIGINT PRIMARY KEY, enable BOOLEAN DEFAULT true)`,
+		`INSERT INTO nodes(id, enable) VALUES(1, true), (2, false)`,
+		`CREATE TABLE client_global_traffics (id BIGSERIAL PRIMARY KEY, email TEXT, updated_at BIGINT)`,
+	} {
+		if _, err := st.execContext(ctx, statement); err != nil {
+			t.Fatalf("seed node tables: %v", err)
+		}
+	}
+	now := time.Unix(1_700_000_000, 0)
+	role, err := st.PanelRole(ctx, now)
+	if err != nil {
+		t.Fatalf("panel role: %v", err)
+	}
+	if role.Name() != "master" || role.Nodes != 1 {
+		t.Fatalf("role = %#v, want master with one enabled node", role)
+	}
+	if _, err := st.execContext(ctx, `INSERT INTO client_global_traffics(email, updated_at) VALUES('user@example.com', ?)`, now.UnixMilli()); err != nil {
+		t.Fatalf("insert master usage: %v", err)
+	}
+	role, err = st.PanelRole(ctx, now)
+	if err != nil {
+		t.Fatalf("panel role: %v", err)
+	}
+	if role.Name() != "node" {
+		t.Fatalf("role = %#v, want node", role)
 	}
 }
 

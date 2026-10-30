@@ -32,6 +32,7 @@ body:
         architecture: linux_arm64
         3x-ui version: unknown
         database backend: postgres
+        panel role: master
         service: active
     validations:
       required: true

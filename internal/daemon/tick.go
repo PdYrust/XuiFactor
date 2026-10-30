@@ -23,7 +23,10 @@ type Runner struct {
 	now   func() time.Time
 
 	beforeCounterUpdate func(context.Context, *store.Tx, store.ActiveRuleClient, store.ClientTraffic) error
+	lastTickError       string
 }
+
+var ErrManagedPanel = errors.New("this panel is managed by a 3x-ui master: run xui-factor on the master, or set factor_on_managed_node when the master does not factor these clients")
 
 type TickResult struct {
 	ActiveClients int
@@ -34,6 +37,7 @@ type TickResult struct {
 	Baselined     int
 	Rebaselined   int
 	Missing       int
+	Deferred      int
 }
 
 func New(st *store.Store, cfg config.Config, out, err io.Writer) *Runner {
@@ -61,11 +65,11 @@ func NewWithClock(st *store.Store, cfg config.Config, out, err io.Writer, now fu
 }
 
 func (r TickResult) HasWork() bool {
-	return r.Reconciled > 0 || r.Enrolled > 0 || r.EnrollSkipped > 0 || r.Applied > 0 || r.Baselined > 0 || r.Rebaselined > 0 || r.Missing > 0
+	return r.Reconciled > 0 || r.Enrolled > 0 || r.EnrollSkipped > 0 || r.Applied > 0 || r.Baselined > 0 || r.Rebaselined > 0 || r.Missing > 0 || r.Deferred > 0
 }
 
 func (r TickResult) Summary() string {
-	return fmt.Sprintf("active=%d reconciled=%d enrolled=%d enroll_skipped=%d applied=%d baselined=%d rebaselined=%d missing=%d",
+	return fmt.Sprintf("active=%d reconciled=%d enrolled=%d enroll_skipped=%d applied=%d baselined=%d rebaselined=%d missing=%d deferred=%d",
 		r.ActiveClients,
 		r.Reconciled,
 		r.Enrolled,
@@ -74,14 +78,28 @@ func (r TickResult) Summary() string {
 		r.Baselined,
 		r.Rebaselined,
 		r.Missing,
+		r.Deferred,
 	)
 }
 
 func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
-	now := r.now().Unix()
+	clock := r.now()
+	now := clock.Unix()
 	var result TickResult
 
 	err := r.store.WithImmediateTx(ctx, func(tx *store.Tx) error {
+		// Factoring on a node and again on its master would multiply node
+		// traffic twice, because the master adds the node's counter deltas.
+		if !r.cfg.FactorOnManagedNode {
+			role, err := tx.PanelRole(ctx, clock)
+			if err != nil {
+				return err
+			}
+			if role.Managed {
+				return ErrManagedPanel
+			}
+		}
+
 		reconciled, err := engine.ReconcileTx(ctx, tx, now, engine.ReconcileRequest{})
 		if err != nil {
 			return err
@@ -136,6 +154,7 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 			result.Baselined += step.Baselined
 			result.Rebaselined += step.Rebaselined
 			result.Missing += step.Missing
+			result.Deferred += step.Deferred
 			for _, suppressed := range decision.Suppressed {
 				if err := r.refreshSuppressedBaseline(ctx, tx, suppressed, now); err != nil {
 					return err
@@ -287,13 +306,17 @@ type targetResult struct {
 	Baselined   int
 	Rebaselined int
 	Missing     int
+	Deferred    int
 }
 
 func (r *Runner) tickTarget(ctx context.Context, tx *store.Tx, target store.ActiveRuleClient, now int64) (targetResult, error) {
 	current, err := tx.LockClientTraffic(ctx, target.Client.TrafficID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
 			return r.markMissing(ctx, tx, target, now)
+		case errors.Is(err, store.ErrLocked):
+			return targetResult{Deferred: 1}, nil
 		}
 		return targetResult{}, err
 	}

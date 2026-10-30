@@ -75,6 +75,8 @@ disabled_rule_retention: 7d
 audit_retention: 30d
 ```
 
+`factor_on_managed_node` (default `false`) allows ticks on a panel managed by a 3x-ui master; see [Master and node panels](#17-master-and-node-panels).
+
 ## 5. First health check
 
 Run doctor before applying rules:
@@ -83,7 +85,7 @@ Run doctor before applying rules:
 xui-factor doctor
 ```
 
-Doctor checks config loading, the active database backend and connection, database access and write access, the required 3x-ui 3.x tables and columns (`client_traffics`, `inbounds`, `clients`, `client_inbounds`), XuiFactor metadata readiness, backup directory access, rule counts, and service state where available.
+Doctor checks config loading, the active database backend and connection, database access and write access, the required 3x-ui 3.x tables and columns (`client_traffics`, `inbounds`, `clients`, `client_inbounds`), XuiFactor metadata readiness, backup directory access, the panel role in a master/node setup, rule counts, and service state where available.
 
 ## 6. Backups
 
@@ -298,9 +300,23 @@ journalctl -u xui-factor.service -f
 
 The service runs `xui-factor` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
 
-Each tick runs in one write transaction. On SQLite the transaction holds the database write lock, so the panel waits up to its busy timeout. On PostgreSQL the tick locks only the traffic rows of the clients it factors, in the same order the panel's traffic writer uses, so concurrent panel traffic writes wait briefly instead of aborting the tick. `busy_timeout` bounds how long XuiFactor waits for those locks.
+Each tick runs in one write transaction. On SQLite the transaction holds the database write lock, so the panel waits up to its busy timeout. On PostgreSQL the tick locks only the traffic rows of the clients it factors and never waits for a row the panel is writing: that client is reported as `deferred`, its baseline stays unchanged, and the next tick factors the full delta. This keeps ticks from deadlocking with the panel's traffic jobs. `busy_timeout` bounds how long XuiFactor waits for any other lock.
 
-## 17. Report, status, and audit
+A tick error that repeats is logged once; `tick: recovered` is logged when ticks succeed again.
+
+## 17. Master and node panels
+
+3x-ui 3.x can manage other panels as nodes. The master adds each node's counter deltas to its own `client_traffics` rows and pushes the combined usage back to the nodes, about every 30 seconds, for quota enforcement.
+
+Install XuiFactor on the master only. There it sees every client, including clients attached only to node inbounds, and factors local and node traffic once. `--inbound-id` and inbound scopes accept node inbounds by their id on the master. Nodes enforce quotas with the factored totals the master pushes. In a chain of panels, install XuiFactor on the top master.
+
+Running XuiFactor on a node as well would factor node traffic twice: once on the node, and again when the master adds the node's already factored delta. A panel counts as a managed node when a master pushed client usage to it within the last 24 hours. On such a panel ticks are refused with an error, and `doctor` reports `role: node` with `factoring: refused`.
+
+To factor only the traffic that passes through one node, set `"factor_on_managed_node": true` in that node's config and do not factor the same clients on the master.
+
+`doctor` reports the role as `standalone`, `master` (with the number of enabled nodes), or `node`.
+
+## 18. Report, status, and audit
 
 Show a concise management report:
 
@@ -345,7 +361,7 @@ xui-factor audit --since 24h
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
 
-## 18. Reconcile rules and policies
+## 19. Reconcile rules and policies
 
 Reconcile active single-user rules and policies after a panel upgrade, bulk client changes, or manual database repair:
 
@@ -362,7 +378,7 @@ Renaming a client in the panel keeps its traffic row but changes the email. XuiF
 
 Re-issuing `exclude` or `override` for a client whose stored row was replaced moves the existing row onto the current traffic row instead of creating a duplicate, and `unexclude` and `remove-override` still find the moved row.
 
-## 19. Metadata cleanup
+## 20. Metadata cleanup
 
 The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled. Deleted or replaced clients are first marked missing by traffic id and email. Missing client tracking is pruned after the grace period.
 
@@ -392,7 +408,7 @@ xui-factor cleanup --vacuum
 
 On SQLite this compacts the database file; on PostgreSQL it runs standard `VACUUM` maintenance.
 
-## 20. Update workflow
+## 21. Update workflow
 
 From a new release package, run:
 
@@ -410,7 +426,7 @@ xui-factor reconcile --dry-run
 xui-factor reconcile
 ```
 
-## 21. Uninstall workflow
+## 22. Uninstall workflow
 
 Remove the installed binary, service, and shared package files while preserving config and backups:
 
@@ -426,7 +442,7 @@ sudo ./scripts/uninstall.sh --purge
 
 Uninstall and purge do not remove `/etc/x-ui/x-ui.db` and do not touch a PostgreSQL panel database.
 
-## 22. Recovery expectations
+## 23. Recovery expectations
 
 XuiFactor does not automatically restore backups. To recover from a selected backup:
 
@@ -440,9 +456,10 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 
 Keep backup files until the recovered server has been verified.
 
-## 23. Safety checklist
+## 24. Safety checklist
 
 - Upgrade 3x-ui to 3.x and let the panel boot once before upgrading XuiFactor.
+- With master and node panels, install XuiFactor on the master only.
 - Run `xui-factor doctor` first.
 - Run `xui-factor backup` before broad changes.
 - Test a single user before `enable-all`.

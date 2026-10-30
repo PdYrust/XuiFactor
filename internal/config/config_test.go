@@ -243,6 +243,23 @@ func TestAutoBackendFollowsPanelDatabaseType(t *testing.T) {
 	}
 }
 
+func TestFactorOnManagedNodeDefaultsOff(t *testing.T) {
+	if Defaults().FactorOnManagedNode {
+		t.Fatal("factor_on_managed_node must default to false")
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"factor_on_managed_node": true}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.FactorOnManagedNode {
+		t.Fatal("factor_on_managed_node was not loaded")
+	}
+}
+
 func TestInvalidDatabaseBackendIsRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"database_backend":"postgress"}`), 0o600); err != nil {

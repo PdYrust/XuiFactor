@@ -53,6 +53,7 @@ func openPostgresTickStore(t *testing.T) (*sql.DB, *store.Store) {
 		"client_traffics", "client_inbounds", "clients", "inbounds",
 		"xui_factor_rule_clients", "xui_factor_rules", "xui_factor_scopes",
 		"xui_factor_excludes", "xui_factor_overrides", "xui_factor_events", "xui_factor_meta",
+		"nodes", "client_global_traffics",
 	} {
 		if _, err := raw.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatalf("drop table %s: %v", table, err)
@@ -128,7 +129,7 @@ func TestPostgresTickAppliesFactorThroughMembership(t *testing.T) {
 	}
 }
 
-func TestPostgresTickWaitsForConcurrentPanelWrite(t *testing.T) {
+func TestPostgresTickDefersClientLockedByPanel(t *testing.T) {
 	ctx := context.Background()
 	raw, st := openPostgresTickStore(t)
 
@@ -163,21 +164,25 @@ func TestPostgresTickWaitsForConcurrentPanelWrite(t *testing.T) {
 		result, err := runner.Tick(ctx)
 		done <- tickOutcome{result, err}
 	}()
+	var outcome tickOutcome
 	select {
-	case outcome := <-done:
-		t.Fatalf("tick finished while the panel row was locked: %#v", outcome)
-	case <-time.After(300 * time.Millisecond):
+	case outcome = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tick waited on a row the panel holds")
+	}
+	if outcome.err != nil || outcome.result.Deferred != 1 || outcome.result.Applied != 0 {
+		t.Fatalf("tick while the panel row is locked = %#v, want one deferred client", outcome)
 	}
 	if _, err := panel.ExecContext(ctx, "COMMIT"); err != nil {
 		t.Fatalf("commit panel write: %v", err)
 	}
 
-	outcome := <-done
-	if outcome.err != nil {
-		t.Fatalf("tick after concurrent panel write: %v", outcome.err)
+	result, err := runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick after the panel commit: %v", err)
 	}
-	if outcome.result.Applied != 1 {
-		t.Fatalf("result = %#v, want one applied factor", outcome.result)
+	if result.Applied != 1 {
+		t.Fatalf("result = %#v, want the deferred delta applied", result)
 	}
 	var up, down int64
 	if err := raw.QueryRowContext(ctx, `SELECT up, down FROM client_traffics WHERE id = 1`).Scan(&up, &down); err != nil {

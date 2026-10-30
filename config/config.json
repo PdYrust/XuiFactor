@@ -10,5 +10,6 @@
   "auto_cleanup": true,
   "missing_client_grace": "30s",
   "disabled_rule_retention": "7d",
-  "audit_retention": "30d"
+  "audit_retention": "30d",
+  "factor_on_managed_node": false
 }

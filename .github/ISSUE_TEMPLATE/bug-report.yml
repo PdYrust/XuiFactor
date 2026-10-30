@@ -47,6 +47,7 @@ body:
         architecture: linux_amd64
         install method: release package
         database backend: sqlite
+        panel role: standalone
         3x-ui version: unknown
     validations:
       required: true

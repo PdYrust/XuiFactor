@@ -4,9 +4,16 @@ All notable changes to XuiFactor are documented in this file.
 
 ## v0.5.1-beta - Unreleased
 
+### Added
+
+- 3x-ui master and node support. On a master, XuiFactor factors local traffic and the node deltas the master merges, once. On a panel managed by a master (a master pushed client usage within 24 hours), ticks are refused so node traffic is not factored twice; `factor_on_managed_node` allows them when the master does not factor the same clients.
+- `doctor` reports the panel role (`standalone`, `master` with its enabled node count, or `node`) and warns on a managed node.
+- `tick` reports `deferred` clients.
+
 ### Fixed
 
-- PostgreSQL ticks no longer abort when the panel writes traffic at the same moment. The tick locks each traffic row before computing its factor, in the ascending id order the panel's traffic writer uses, so the compare-and-swap update cannot be overtaken and a busy panel no longer starves the daemon.
+- PostgreSQL ticks no longer abort or deadlock when the panel writes traffic at the same moment, including the master's node traffic merge, which locks rows in snapshot order. The tick locks each traffic row before computing its factor and skips a row the panel holds; that client is deferred to the next tick with its baseline unchanged, so no traffic is lost and the panel's own transactions are never chosen as deadlock victims.
+- A tick error that repeats is logged once instead of every poll interval, followed by `tick: recovered`.
 - Auto backend detection now matches the panel: PostgreSQL is selected only when `XUI_DB_TYPE` asks for it, so a leftover `XUI_DB_DSN` on a SQLite panel is ignored, and a `database_dsn` in the config file takes precedence over the panel environment.
 - An unknown `database_backend` value is rejected instead of silently falling back to SQLite.
 - `doctor`, `report`, and the daemon log redact the password of URL DSNs without a host, such as `postgres://user:pass@/x-ui?host=/run/postgresql`.
@@ -23,7 +30,7 @@ All notable changes to XuiFactor are documented in this file.
 - The installer creates `/etc/xui-factor/config.json` with mode `0600`, because `database_dsn` can hold a password. Existing config files keep their mode.
 - `backup` prints a `pg_restore` hint on PostgreSQL, and CLI help describes `backup` and `reconcile` for both backends.
 - `make verify-installers` checks that the installed unit matches the packaged unit and that the new config file is private.
-- Regression tests cover concurrent panel writes on PostgreSQL, read-only PostgreSQL sessions, auto backend detection, hostless DSN redaction, one-time skip auditing, and `unexclude` baselines.
+- Regression tests cover concurrent panel writes on PostgreSQL, read-only PostgreSQL sessions, auto backend detection, hostless DSN redaction, one-time skip auditing, `unexclude` baselines, panel role detection, and the managed node guard.
 
 ### Safety
 

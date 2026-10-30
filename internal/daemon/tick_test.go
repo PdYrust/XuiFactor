@@ -1257,6 +1257,97 @@ func createTickSchema(t *testing.T, dbPath string) {
 	`)
 }
 
+func TestTickRefusesOnPanelManagedByMaster(t *testing.T) {
+	ctx := context.Background()
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
+	defer h.store.Close()
+
+	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "2"}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	pushedAt := time.Unix(1_700_000_000, 0).Add(-time.Minute).UnixMilli()
+	setMasterPush(t, h.dbPath, pushedAt)
+	setCounters(t, h.dbPath, 1, 110, 220)
+
+	if _, err := h.runner.Tick(ctx); !errors.Is(err, ErrManagedPanel) {
+		t.Fatalf("tick on a managed panel = %v, want ErrManagedPanel", err)
+	}
+	assertCounters(t, h.dbPath, 1, 110, 220)
+
+	h.runner.cfg.FactorOnManagedNode = true
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick with factor_on_managed_node: %v", err)
+	}
+	if result.Applied != 1 {
+		t.Fatalf("result = %#v, want one applied factor", result)
+	}
+	assertCounters(t, h.dbPath, 1, 120, 240)
+}
+
+func TestTickResumesWhenMasterStopsManagingPanel(t *testing.T) {
+	ctx := context.Background()
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
+	defer h.store.Close()
+
+	if _, err := h.engine.Enable(ctx, engine.EnableRequest{Email: "user@example.com", Factor: "2"}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	setMasterPush(t, h.dbPath, time.Unix(1_700_000_000, 0).Add(-25*time.Hour).UnixMilli())
+	setCounters(t, h.dbPath, 1, 110, 220)
+
+	result, err := h.runner.Tick(ctx)
+	if err != nil {
+		t.Fatalf("tick after the master stopped pushing: %v", err)
+	}
+	if result.Applied != 1 {
+		t.Fatalf("result = %#v, want one applied factor", result)
+	}
+}
+
+func TestRunTickLogsRepeatedErrorOnce(t *testing.T) {
+	ctx := context.Background()
+	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
+	defer h.store.Close()
+
+	setMasterPush(t, h.dbPath, time.Unix(1_700_000_000, 0).UnixMilli())
+	var out, errOut bytes.Buffer
+	h.runner.out = &out
+	h.runner.err = &errOut
+	h.runner.runTick(ctx)
+	h.runner.runTick(ctx)
+	if got := strings.Count(errOut.String(), "tick: error"); got != 1 {
+		t.Fatalf("logged %d tick errors, want 1: %q", got, errOut.String())
+	}
+
+	db := openTickDB(t, h.dbPath)
+	execTickSQL(t, db, `DELETE FROM client_global_traffics`)
+	db.Close()
+	h.runner.runTick(ctx)
+	if !strings.Contains(out.String(), "tick: recovered") {
+		t.Fatalf("expected recovery log, got %q", out.String())
+	}
+}
+
+// setMasterPush records client usage pushed by a master, as the panel stores it
+// on a node.
+func setMasterPush(t *testing.T, dbPath string, updatedAtMillis int64) {
+	t.Helper()
+	db := openTickDB(t, dbPath)
+	defer db.Close()
+	execTickSQL(t, db, `CREATE TABLE IF NOT EXISTS client_global_traffics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		master_guid TEXT NOT NULL,
+		email TEXT NOT NULL,
+		up INTEGER,
+		down INTEGER,
+		updated_at INTEGER
+	)`)
+	execTickSQL(t, db, `DELETE FROM client_global_traffics`)
+	execTickSQL(t, db, `INSERT INTO client_global_traffics(master_guid, email, up, down, updated_at)
+		VALUES('master', 'user@example.com', 0, 0, ?)`, updatedAtMillis)
+}
+
 func setCounters(t *testing.T, dbPath string, id, up, down int64) {
 	t.Helper()
 	db := openTickDB(t, dbPath)

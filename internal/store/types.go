@@ -38,6 +38,7 @@ var (
 	ErrConflict  = errors.New("conflict")
 	ErrSchema    = errors.New("schema validation failed")
 	ErrRace      = errors.New("compare-and-swap update failed")
+	ErrLocked    = errors.New("row is locked by another writer")
 )
 
 type ClientTraffic struct {

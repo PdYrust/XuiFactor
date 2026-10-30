@@ -38,6 +38,7 @@ type Config struct {
 	MissingClientGrace    time.Duration
 	DisabledRuleRetention time.Duration
 	AuditRetention        time.Duration
+	FactorOnManagedNode   bool
 }
 
 type fileConfig struct {
@@ -53,6 +54,7 @@ type fileConfig struct {
 	MissingClientGrace    string `json:"missing_client_grace"`
 	DisabledRuleRetention string `json:"disabled_rule_retention"`
 	AuditRetention        string `json:"audit_retention"`
+	FactorOnManagedNode   *bool  `json:"factor_on_managed_node"`
 }
 
 func Defaults() Config {
@@ -271,6 +273,9 @@ func Load(path string) (Config, error) {
 	}
 	if raw.AutoCleanup != nil {
 		cfg.AutoCleanup = *raw.AutoCleanup
+	}
+	if raw.FactorOnManagedNode != nil {
+		cfg.FactorOnManagedNode = *raw.FactorOnManagedNode
 	}
 	if strings.TrimSpace(raw.MissingClientGrace) != "" {
 		d, err := parseDuration(strings.TrimSpace(raw.MissingClientGrace))

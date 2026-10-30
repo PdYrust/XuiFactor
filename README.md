@@ -22,6 +22,8 @@ XuiFactor applies temporary traffic factors to 3x-ui client counters as a sideca
 
 Disabling a rule keeps previously factored traffic results. Future traffic after disabling is counted normally.
 
+With 3x-ui master and node panels, install XuiFactor on the master only. The master already adds node traffic to its counters, so it factors local and node traffic once; on a panel managed by a master, ticks are refused to prevent double factoring.
+
 For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Install
@@ -158,7 +160,7 @@ Run a backup before broad changes:
 xui-factor backup
 ```
 
-Test single-user rules before bulk rules on production servers.
+Test single-user rules before bulk rules on production servers. With master and node panels, run `xui-factor doctor` on the master and confirm `role: master`.
 
 ## Uninstall
 

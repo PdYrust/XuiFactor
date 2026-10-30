@@ -251,6 +251,26 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 	}
 	out.Field("backup dir", cfg.BackupDir)
 
+	role, err := st.PanelRole(ctx, time.Now())
+	if err != nil {
+		a.printError(err)
+		return 1
+	}
+	out.Section("Panel")
+	out.Field("role", role.Name())
+	if role.Nodes > 0 {
+		out.Field("nodes", role.Nodes)
+	}
+	if role.Managed {
+		if cfg.FactorOnManagedNode {
+			out.Field("factoring", "enabled by factor_on_managed_node")
+			warnings = append(warnings, "factor_on_managed_node is set: the master must not run xui-factor for the same clients, or node traffic is factored twice")
+		} else {
+			out.Field("factoring", "refused")
+			warnings = append(warnings, "this panel is managed by a 3x-ui master; ticks are refused here, run xui-factor on the master")
+		}
+	}
+
 	service := systemdServiceState()
 	out.Section("Service")
 	out.Field("installed", service.Installed)
@@ -1241,6 +1261,7 @@ func (a *App) runTick(ctx context.Context, opts commonOptions, args []string) in
 	out.Field("baselined", result.Baselined)
 	out.Field("rebaselined", result.Rebaselined)
 	out.Field("missing", result.Missing)
+	out.Field("deferred", result.Deferred)
 	return 0
 }
 
