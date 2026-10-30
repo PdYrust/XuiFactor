@@ -7,6 +7,7 @@ All notable changes to XuiFactor are documented in this file.
 ### Added
 
 - First stable release for 3x-ui 3.x with SQLite and PostgreSQL panels; v0.6.0 release notes cover the upgrade from v0.4.0 and from v0.5.0-beta.
+- Short `factor` command. Install and update link `/usr/local/bin/factor` to the `xui-factor` binary, and uninstall removes the link; an existing `factor` that belongs to something else is left untouched. Calls that start with a number, such as `factor 42`, go to the coreutils `factor` command. Help, hints, and documentation use `factor`.
 - 3x-ui master and node support. On a master, XuiFactor factors local traffic and the node deltas the master merges, once. On a panel managed by a master (a master pushed client usage within 24 hours), ticks are refused so node traffic is not factored twice; `factor_on_managed_node` allows them when the master does not factor the same clients.
 - `doctor` reports the panel role (`standalone`, `master` with its enabled node count, or `node`) and warns on a managed node.
 - `tick` reports `deferred` clients.

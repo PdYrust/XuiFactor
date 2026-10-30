@@ -22,15 +22,15 @@ func TestRunHelp(t *testing.T) {
 	output := out.String()
 	for _, want := range []string{
 		"Usage:",
-		"xui-factor enable --email user@example.com --factor 1.2",
-		"xui-factor enable-all --factor 1.2",
-		"xui-factor enable-all --factor 1.2 --limited-only",
-		"xui-factor disable --email user@example.com",
-		"xui-factor disable-all",
-		"xui-factor backup",
-		"xui-factor doctor",
-		"xui-factor tick",
-		"xui-factor run",
+		"factor enable --email user@example.com --factor 1.2",
+		"factor enable-all --factor 1.2",
+		"factor enable-all --factor 1.2 --limited-only",
+		"factor disable --email user@example.com",
+		"factor disable-all",
+		"factor backup",
+		"factor doctor",
+		"factor tick",
+		"factor run",
 		"Project:",
 		"creator: YrustPd",
 		"repository: https://github.com/PdYrust/XuiFactor",
@@ -54,13 +54,13 @@ func TestBareInvocationShowsBriefUsage(t *testing.T) {
 		"Usage:",
 		"enable-all Enable factor rules for selected clients",
 		"Flags:",
-		`Run "xui-factor --help" for command examples.`,
+		`Run "factor --help" for command examples.`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected brief usage to contain %q, got %q", want, output)
 		}
 	}
-	for _, unwanted := range []string{"Examples:", "xui-factor enable-all --factor", "Project:"} {
+	for _, unwanted := range []string{"Examples:", "factor enable-all --factor", "Project:"} {
 		if strings.Contains(output, unwanted) {
 			t.Fatalf("bare invocation should not print %q: %q", unwanted, output)
 		}
@@ -134,6 +134,25 @@ func TestHelpListsMajorCommands(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected help output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestIsPrimeFactorCall(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"42"}, true},
+		{[]string{"12", "35"}, true},
+		{[]string{"doctor"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"-h", "12"}, false},
+		{[]string{"4x"}, false},
+	} {
+		if got := IsPrimeFactorCall(tc.args); got != tc.want {
+			t.Fatalf("IsPrimeFactorCall(%q) = %v, want %v", tc.args, got, tc.want)
 		}
 	}
 }
@@ -262,8 +281,8 @@ func TestIssueTemplates(t *testing.T) {
 	for _, want := range []string{
 		"XuiFactor version",
 		"3x-ui version",
-		"xui-factor doctor",
-		"xui-factor status",
+		"factor doctor",
+		"factor status",
 		"systemctl status xui-factor.service --no-pager",
 		"full database files",
 	} {

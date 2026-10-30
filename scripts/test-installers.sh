@@ -177,7 +177,19 @@ run_destdir_skips_systemctl() {
 	fi
 }
 
+run_foreign_factor_is_kept() {
+	root="$WORK_DIR/foreign-factor-root"
+	mkdir -p "$root/usr/local/bin"
+	printf '%s\n' '#!/bin/sh' > "$root/usr/local/bin/factor"
+	DESTDIR="$root" sh "$PACKAGE_DIR/scripts/install.sh" >/dev/null 2>"$WORK_DIR/foreign-factor.err"
+	[ ! -L "$root/usr/local/bin/factor" ] || die "install replaced an existing factor command"
+	grep -Fq "already exists" "$WORK_DIR/foreign-factor.err" || die "install did not warn about an existing factor command"
+	DESTDIR="$root" sh "$PACKAGE_DIR/scripts/uninstall.sh" >/dev/null
+	[ -f "$root/usr/local/bin/factor" ] || die "uninstall removed a factor command it did not install"
+}
+
 mkdir -p "$WORK_DIR"
+run_foreign_factor_is_kept
 run_install_default
 run_install_no_start
 run_install_no_enable

@@ -1,4 +1,5 @@
 APP := xui-factor
+COMMAND := factor
 CMD := ./cmd/xui-factor
 BUILDINFO_PKG := github.com/PdYrust/XuiFactor/internal/buildinfo
 VERSION ?= $(shell cat VERSION)
@@ -153,6 +154,7 @@ verify-installers:
 		root="$$tmp_dir/root"; \
 		DESTDIR="$$root" sh "$$pkg/scripts/install.sh" >/dev/null; \
 		test -x "$$root/usr/local/bin/$(APP)"; \
+		test "$$(readlink "$$root/usr/local/bin/$(COMMAND)")" = "$(APP)"; \
 		test -f "$$root/usr/local/share/$(APP)/README.md"; \
 		test -f "$$root/usr/local/share/$(APP)/LICENSE"; \
 		test -f "$$root/usr/local/share/$(APP)/VERSION"; \
@@ -169,6 +171,8 @@ verify-installers:
 		if [ "$$arch" = "$$host_arch" ]; then \
 			"$$root/usr/local/bin/$(APP)" --version >/dev/null; \
 			"$$root/usr/local/bin/$(APP)" --help >/dev/null; \
+			"$$root/usr/local/bin/$(COMMAND)" version >/dev/null; \
+			if [ -x /usr/bin/factor ]; then test "$$("$$root/usr/local/bin/$(COMMAND)" 12)" = "12: 2 2 3"; fi; \
 		fi; \
 		printf '%s\n' '{"database_path":"/tmp/preserved-x-ui.db"}' > "$$root/etc/xui-factor/config.json"; \
 		printf '%s\n' old > "$$root/usr/local/share/$(APP)/VERSION"; \
@@ -179,6 +183,7 @@ verify-installers:
 		printf '%s\n' keep > "$$root/etc/x-ui/x-ui.db"; \
 		DESTDIR="$$root" sh "$$pkg/scripts/uninstall.sh" >/dev/null; \
 		test ! -e "$$root/usr/local/bin/$(APP)"; \
+		test ! -L "$$root/usr/local/bin/$(COMMAND)"; \
 		test ! -e "$$root/etc/systemd/system/xui-factor.service"; \
 		test ! -e "$$root/usr/local/share/$(APP)"; \
 		test -f "$$root/etc/xui-factor/config.json"; \

@@ -211,7 +211,7 @@ func (s *Store) ValidateRequiredSchema(ctx context.Context) error {
 			return fmt.Errorf("%w: read %s columns: %v", ErrSchema, required.table, err)
 		}
 		if required.table == "client_traffics" && columns["all_time"] {
-			return fmt.Errorf("%w: client_traffics.all_time found; upgrade 3x-ui to 3.x before running xui-factor", ErrSchema)
+			return fmt.Errorf("%w: client_traffics.all_time found; upgrade 3x-ui to 3.x before running XuiFactor", ErrSchema)
 		}
 		for _, column := range required.columns {
 			if !columns[column] {

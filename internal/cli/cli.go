@@ -20,8 +20,12 @@ import (
 	"github.com/PdYrust/XuiFactor/internal/store"
 )
 
+// CommandName is the command users type; the installer links it to the
+// xui-factor binary.
+const CommandName = "factor"
+
 const (
-	appName     = "xui-factor"
+	appName     = CommandName
 	displayName = "XuiFactor"
 
 	projectCreator    = "YrustPd"
@@ -47,6 +51,20 @@ func New(out, err io.Writer) *App {
 		Err:  err,
 		Info: buildinfo.Current(),
 	}
+}
+
+// IsPrimeFactorCall reports a coreutils style call such as "factor 42". No
+// XuiFactor command starts with a number, so these calls are unambiguous.
+func IsPrimeFactorCall(args []string) bool {
+	if len(args) == 0 || args[0] == "" {
+		return false
+	}
+	for _, r := range args[0] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *App) Run(args []string) int {
@@ -264,10 +282,10 @@ func (a *App) runDoctor(ctx context.Context, opts commonOptions, args []string) 
 	if role.Managed {
 		if cfg.FactorOnManagedNode {
 			out.Field("factoring", "enabled by factor_on_managed_node")
-			warnings = append(warnings, "factor_on_managed_node is set: the master must not run xui-factor for the same clients, or node traffic is factored twice")
+			warnings = append(warnings, "factor_on_managed_node is set: the master must not run XuiFactor for the same clients, or node traffic is factored twice")
 		} else {
 			out.Field("factoring", "refused")
-			warnings = append(warnings, "this panel is managed by a 3x-ui master; ticks are refused here, run xui-factor on the master")
+			warnings = append(warnings, "this panel is managed by a 3x-ui master; ticks are refused here, run XuiFactor on the master")
 		}
 	}
 
@@ -527,7 +545,7 @@ func (a *App) runClientStatus(ctx context.Context, opts commonOptions, flags sta
 	if result.Truncated {
 		out.Section("Hint")
 		out.Field("showing", result.Limit)
-		out.Field("run", "xui-factor status --clients --inbound-id ID")
+		out.Field("run", "factor status --clients --inbound-id ID")
 	}
 	return 0
 }
@@ -548,7 +566,7 @@ func (a *App) runExplain(ctx context.Context, opts commonOptions, args []string)
 	result, err := svc.Explain(ctx, engine.ExplainRequest{Email: flags.email, InboundID: flags.inboundID})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status --clients --inbound-id ID")
+			a.printTargetError("client not found", flags.email, flags.inboundID, "factor status --clients --inbound-id ID")
 			return commandErrorCode(err)
 		}
 		a.printError(err)
@@ -603,7 +621,7 @@ func (a *App) runEnable(ctx context.Context, opts commonOptions, args []string) 
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status")
+			a.printTargetError("client not found", flags.email, flags.inboundID, "factor status")
 			return commandErrorCode(err)
 		}
 		a.printError(err)
@@ -690,7 +708,7 @@ func (a *App) runExclude(ctx context.Context, opts commonOptions, args []string)
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status")
+			a.printTargetError("client not found", flags.email, flags.inboundID, "factor status")
 			return commandErrorCode(err)
 		}
 		a.printError(err)
@@ -796,7 +814,7 @@ func (a *App) runOverride(ctx context.Context, opts commonOptions, args []string
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			a.printTargetError("client not found", flags.email, flags.inboundID, "xui-factor status")
+			a.printTargetError("client not found", flags.email, flags.inboundID, "factor status")
 			return commandErrorCode(err)
 		}
 		a.printError(err)
@@ -1155,9 +1173,9 @@ func (a *App) runBackup(ctx context.Context, opts commonOptions, args []string) 
 	out.Section("Restore")
 	out.Field("mode", "manual only")
 	if cfg.ResolvedBackend() == config.BackendPostgres {
-		out.Field("hint", "stop x-ui and xui-factor, then restore with pg_restore")
+		out.Field("hint", "stop x-ui and xui-factor.service, then restore with pg_restore")
 	} else {
-		out.Field("hint", "stop x-ui and xui-factor before replacing the database")
+		out.Field("hint", "stop x-ui and xui-factor.service before replacing the database")
 	}
 	return 0
 }
@@ -2368,7 +2386,7 @@ func (a *App) ensureWriters() {
 }
 
 const usageCore = `Usage:
-  xui-factor [--config PATH] [--database PATH] [command]
+  factor [--config PATH] [--database PATH] [command]
 
 Commands:
   help       Show this help text
@@ -2404,29 +2422,29 @@ Flags:
   --config PATH   Load JSON config from PATH
   --database PATH Override configured SQLite database path`
 
-const helpExamples = `  xui-factor enable --email user@example.com --factor 1.2
-  xui-factor enable-all --factor 1.2
-  xui-factor enable-all --factor 1.2 --limited-only
-  xui-factor enable-all --factor 1.2 --once
-  xui-factor explain --email user@example.com --inbound-id 1
-  xui-factor status --effective
-  xui-factor status --clients --inbound-id 1
-  xui-factor exclude --email user@example.com --inbound-id 1
-  xui-factor excludes
-  xui-factor override --email user@example.com --inbound-id 1 --factor 1.2
-  xui-factor overrides
-  xui-factor report
-  xui-factor report --inbound-id 1
-  xui-factor audit --event traffic_applied --limit 20
-  xui-factor audit --since 24h
-  xui-factor disable --email user@example.com
-  xui-factor disable-all
-  xui-factor backup
-  xui-factor cleanup --dry-run
-  xui-factor reconcile --dry-run
-  xui-factor doctor
-  xui-factor tick
-  xui-factor run`
+const helpExamples = `  factor enable --email user@example.com --factor 1.2
+  factor enable-all --factor 1.2
+  factor enable-all --factor 1.2 --limited-only
+  factor enable-all --factor 1.2 --once
+  factor explain --email user@example.com --inbound-id 1
+  factor status --effective
+  factor status --clients --inbound-id 1
+  factor exclude --email user@example.com --inbound-id 1
+  factor excludes
+  factor override --email user@example.com --inbound-id 1 --factor 1.2
+  factor overrides
+  factor report
+  factor report --inbound-id 1
+  factor audit --event traffic_applied --limit 20
+  factor audit --since 24h
+  factor disable --email user@example.com
+  factor disable-all
+  factor backup
+  factor cleanup --dry-run
+  factor reconcile --dry-run
+  factor doctor
+  factor tick
+  factor run`
 
 func (a *App) printUsage(w io.Writer) {
 	fmt.Fprintf(w, "%s\n\n%s\n\nRun \"%s --help\" for command examples.\n", displayName, usageCore, appName)

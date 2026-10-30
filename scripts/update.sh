@@ -37,6 +37,7 @@ main() {
 	require_linux
 	validate_package
 	install_binary_atomic
+	install_command_link
 	install_shared_files
 	install_default_config
 	install_systemd_service

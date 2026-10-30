@@ -35,7 +35,7 @@ make build
 sudo ./scripts/install.sh
 ```
 
-After installation, the command should be available as `xui-factor`.
+After installation, the command is available as `factor`. The installer links `/usr/local/bin/factor` to the `xui-factor` binary, so both names work. Because `/usr/local/bin` comes before `/usr/bin` in `PATH`, calls that start with a number, such as `factor 42`, are passed to the coreutils `factor` command unchanged. If `/usr/local/bin/factor` already belongs to something else, the installer leaves it alone and prints a warning; use `xui-factor` then.
 
 ## 4. Default paths and database backends
 
@@ -82,7 +82,7 @@ audit_retention: 30d
 Run doctor before applying rules:
 
 ```sh
-xui-factor doctor
+factor doctor
 ```
 
 Doctor checks config loading, the active database backend and connection, database access and write access, the required 3x-ui 3.x tables and columns (`client_traffics`, `inbounds`, `clients`, `client_inbounds`), XuiFactor metadata readiness, backup directory access, the panel role in a master/node setup, rule counts, and service state where available.
@@ -92,7 +92,7 @@ Doctor checks config loading, the active database backend and connection, databa
 Create a backup before broad changes:
 
 ```sh
-xui-factor backup
+factor backup
 ```
 
 Backups are written to the configured backup directory and the command prints the final backup path. On SQLite the backup is a consistent `.db` file. On PostgreSQL the backup is a `.dump` file created with `pg_dump`; install PostgreSQL client tools whose major version is at least the server's. The dump uses the connection settings from the configured DSN, including its TLS settings, and ignores `PG*` variables in the calling environment.
@@ -102,7 +102,7 @@ Backups are written to the configured backup directory and the command prints th
 Apply a factor to one client:
 
 ```sh
-xui-factor enable --email User --inbound-id 1 --factor 1.2
+factor enable --email User --inbound-id 1 --factor 1.2
 ```
 
 `factor 1.2` means new traffic is counted as 120%. `factor 5` means new traffic is counted as 500%. `factor 1` applies no extra traffic and only refreshes baseline behavior during ticks.
@@ -114,7 +114,7 @@ Use `--inbound-id` to scope a command to one inbound. On 3.x emails are unique; 
 Apply a factor to all enabled clients:
 
 ```sh
-xui-factor enable-all --factor 1.2
+factor enable-all --factor 1.2
 ```
 
 `enable-all` is persistent by default. Current matching clients are enrolled immediately, and future matching clients are enrolled by the daemon tick from their current counters. Traffic that happened before enrollment is not factored.
@@ -126,19 +126,19 @@ A client belongs to the first active rule or scope that enrolls it, which matter
 Apply a factor only to clients with a configured traffic limit:
 
 ```sh
-xui-factor enable-all --factor 1.2 --limited-only
+factor enable-all --factor 1.2 --limited-only
 ```
 
 Apply a factor only within one inbound:
 
 ```sh
-xui-factor enable-all --factor 1.2 --inbound-id 1
+factor enable-all --factor 1.2 --inbound-id 1
 ```
 
 Use snapshot mode to target only clients that exist when the command runs:
 
 ```sh
-xui-factor enable-all --factor 1.2 --once
+factor enable-all --factor 1.2 --once
 ```
 
 Paused and disabled bulk scopes do not enroll new clients. Resuming a paused scope refreshes existing baselines before enrollment continues.
@@ -156,19 +156,19 @@ This keeps overlapping metadata from double-applying factors. Suppressed lower-p
 Exclude one client from future factor application while keeping broad rules or scopes active:
 
 ```sh
-xui-factor exclude --email User --inbound-id 1
+factor exclude --email User --inbound-id 1
 ```
 
 List active excludes:
 
 ```sh
-xui-factor excludes
+factor excludes
 ```
 
 Disable an exclude:
 
 ```sh
-xui-factor unexclude --email User --inbound-id 1
+factor unexclude --email User --inbound-id 1
 ```
 
 An exclude is tied to the client (traffic id and email). It stops future factor updates for that client but does not subtract previously factored traffic. The stored inbound is informational and follows the client when it moves between inbounds. `unexclude` refreshes the client's baselines from the current counters, so matching rules and scopes factor only traffic that arrives afterwards; traffic from the excluded period is not retroactively factored.
@@ -178,19 +178,19 @@ An exclude is tied to the client (traffic id and email). It stops future factor 
 Set a specific future factor for one client while keeping broad rules or scopes active:
 
 ```sh
-xui-factor override --email User --inbound-id 1 --factor 1.2
+factor override --email User --inbound-id 1 --factor 1.2
 ```
 
 List active overrides:
 
 ```sh
-xui-factor overrides
+factor overrides
 ```
 
 Remove an override:
 
 ```sh
-xui-factor remove-override --email User --inbound-id 1
+factor remove-override --email User --inbound-id 1
 ```
 
 An override is tied to the client (traffic id and email). It replaces the broader matched factor for that client and does not stack with a scope factor. Exclude policies still win over overrides. The stored inbound is informational and follows the client when it moves between inbounds. Previously factored traffic remains unchanged, and removing an override does not retroactively change traffic that arrived while the override was active.
@@ -200,19 +200,19 @@ An override is tied to the client (traffic id and email). It replaces the broade
 Inspect one client's final effective decision:
 
 ```sh
-xui-factor explain --email User --inbound-id 1
+factor explain --email User --inbound-id 1
 ```
 
 Show grouped effective policy totals:
 
 ```sh
-xui-factor status --effective
+factor status --effective
 ```
 
 Show client-level effective factors for one inbound:
 
 ```sh
-xui-factor status --clients --inbound-id 1
+factor status --clients --inbound-id 1
 ```
 
 Effective views use the same precedence as tick:
@@ -228,20 +228,20 @@ Explain and effective status are read-only. They do not create audit events, ref
 Pause one rule without changing counters:
 
 ```sh
-xui-factor pause --email User --inbound-id 1
+factor pause --email User --inbound-id 1
 ```
 
 Resume one paused rule from current counters:
 
 ```sh
-xui-factor resume --email User --inbound-id 1
+factor resume --email User --inbound-id 1
 ```
 
 Pause or resume all matching rules:
 
 ```sh
-xui-factor pause-all
-xui-factor resume-all
+factor pause-all
+factor resume-all
 ```
 
 Traffic accumulated while a rule is paused is not factored when the rule resumes.
@@ -251,13 +251,13 @@ Traffic accumulated while a rule is paused is not factored when the rule resumes
 Disable one rule:
 
 ```sh
-xui-factor disable --email User --inbound-id 1
+factor disable --email User --inbound-id 1
 ```
 
 Disable all active or paused rules:
 
 ```sh
-xui-factor disable-all
+factor disable-all
 ```
 
 Disabling a rule does not subtract previously factored traffic. After disabling, future traffic is counted normally by 3x-ui.
@@ -267,7 +267,7 @@ Disabling a rule does not subtract previously factored traffic. After disabling,
 Run one factor tick manually:
 
 ```sh
-xui-factor tick
+factor tick
 ```
 
 This is useful after enabling a rule, during maintenance checks, or before starting the daemon service.
@@ -298,7 +298,7 @@ Follow service logs:
 journalctl -u xui-factor.service -f
 ```
 
-The service runs `xui-factor` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
+The service runs `xui-factor run` in daemon mode and polls at the interval configured in `/etc/xui-factor/config.json`.
 
 Each tick runs in one write transaction. On SQLite the transaction holds the database write lock, so the panel waits up to its busy timeout. On PostgreSQL the tick locks only the traffic rows of the clients it factors and never waits for a row the panel is writing: that client is reported as `deferred`, its baseline stays unchanged, and the next tick factors the full delta. This keeps ticks from deadlocking with the panel's traffic jobs. `busy_timeout` bounds how long XuiFactor waits for any other lock.
 
@@ -321,8 +321,8 @@ To factor only the traffic that passes through one node, set `"factor_on_managed
 Show a concise management report:
 
 ```sh
-xui-factor report
-xui-factor report --inbound-id 1
+factor report
+factor report --inbound-id 1
 ```
 
 Report summarizes active scopes, single-user rules, excludes, overrides, effective clients, service state, metadata state, and traffic impact. Traffic impact sums the `extra_up` and `extra_down` bytes of `traffic_applied` audit events within audit retention.
@@ -330,7 +330,7 @@ Report summarizes active scopes, single-user rules, excludes, overrides, effecti
 List effective active and paused rules:
 
 ```sh
-xui-factor status
+factor status
 ```
 
 Normal status hides orphaned, merged, and ineffective rules. Persistent scopes remain visible with their current materialized client count.
@@ -342,21 +342,21 @@ Use `status --effective` to inspect grouped final decisions, and `status --clien
 List all rules, including inactive metadata:
 
 ```sh
-xui-factor status --all
+factor status --all
 ```
 
 Show audit events for one client:
 
 ```sh
-xui-factor audit --email User --inbound-id 1
+factor audit --email User --inbound-id 1
 ```
 
 Filter audit events:
 
 ```sh
-xui-factor audit --event override_enabled --limit 20
-xui-factor audit --email User --inbound-id 1
-xui-factor audit --since 24h
+factor audit --event override_enabled --limit 20
+factor audit --email User --inbound-id 1
+factor audit --since 24h
 ```
 
 Use status and audit after lifecycle changes to confirm the intended rule state.
@@ -366,8 +366,8 @@ Use status and audit after lifecycle changes to confirm the intended rule state.
 Reconcile active single-user rules and policies after a panel upgrade, bulk client changes, or manual database repair:
 
 ```sh
-xui-factor reconcile --dry-run
-xui-factor reconcile
+factor reconcile --dry-run
+factor reconcile
 ```
 
 Use `--inbound-id 1` to limit the repair to one inbound. Reconcile adopts compatible single-user rules into matching persistent scopes, marks ineffective active rules as orphaned, and never modifies 3x-ui counters. Orphaned rules are inactive and are pruned later by cleanup retention. The daemon runs the same reconciliation at the start of every tick.
@@ -385,25 +385,25 @@ The daemon runs lightweight cleanup automatically when `auto_cleanup` is enabled
 Run a dry run before manual cleanup on production servers:
 
 ```sh
-xui-factor cleanup --dry-run
+factor cleanup --dry-run
 ```
 
 Run cleanup with configured retention:
 
 ```sh
-xui-factor cleanup
+factor cleanup
 ```
 
 Override disabled-rule and audit retention for one run:
 
 ```sh
-xui-factor cleanup --older-than 24h
+factor cleanup --older-than 24h
 ```
 
 Cleanup prunes only XuiFactor metadata, including inactive excludes and overrides after retention. It never modifies 3x-ui counters and does not subtract previously factored traffic. `VACUUM` is explicit only:
 
 ```sh
-xui-factor cleanup --vacuum
+factor cleanup --vacuum
 ```
 
 On SQLite this compacts the database file; on PostgreSQL it runs standard `VACUUM` maintenance.
@@ -421,9 +421,9 @@ The update workflow preserves existing config, refreshes installed package files
 When upgrading from an older 3x-ui version, upgrade the panel first. Stop `xui-factor.service`, upgrade 3x-ui, let it boot once so its database migration completes, install the new XuiFactor package, and then run:
 
 ```sh
-xui-factor doctor
-xui-factor reconcile --dry-run
-xui-factor reconcile
+factor doctor
+factor reconcile --dry-run
+factor reconcile
 ```
 
 ## 22. Uninstall workflow
@@ -451,8 +451,8 @@ XuiFactor does not automatically restore backups. To recover from a selected bac
 3. Restore the selected backup manually: replace the SQLite database file, or run `pg_restore --clean --if-exists --dbname "$XUI_DB_DSN" x-ui-<timestamp>.dump` on PostgreSQL.
 4. Start 3x-ui.
 5. Start `xui-factor.service`.
-6. Run `xui-factor doctor`.
-7. Check `xui-factor status` and `xui-factor audit`.
+6. Run `factor doctor`.
+7. Check `factor status` and `factor audit`.
 
 Keep backup files until the recovered server has been verified.
 
@@ -460,14 +460,14 @@ Keep backup files until the recovered server has been verified.
 
 - Upgrade 3x-ui to 3.x and let the panel boot once before upgrading XuiFactor.
 - With master and node panels, install XuiFactor on the master only.
-- Run `xui-factor doctor` first.
-- Run `xui-factor backup` before broad changes.
+- Run `factor doctor` first.
+- Run `factor backup` before broad changes.
 - Test a single user before `enable-all`.
-- Use `xui-factor exclude --email User --inbound-id 1` for clients that must not receive a broad factor.
-- Use `xui-factor override --email User --inbound-id 1 --factor 1.2` when one exact client needs a different future factor.
-- Use `xui-factor explain --email User --inbound-id 1` when the final decision is unclear.
+- Use `factor exclude --email User --inbound-id 1` for clients that must not receive a broad factor.
+- Use `factor override --email User --inbound-id 1 --factor 1.2` when one exact client needs a different future factor.
+- Use `factor explain --email User --inbound-id 1` when the final decision is unclear.
 - Use `--limited-only` if unlimited clients should be skipped.
-- Run `xui-factor reconcile --dry-run` after panel upgrades or bulk client changes.
-- Run `xui-factor cleanup --dry-run` before manual metadata cleanup.
-- Verify `xui-factor status` and `xui-factor audit` after changes.
+- Run `factor reconcile --dry-run` after panel upgrades or bulk client changes.
+- Run `factor cleanup --dry-run` before manual metadata cleanup.
+- Verify `factor status` and `factor audit` after changes.
 - Keep backup files before uninstall or purge.

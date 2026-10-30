@@ -38,6 +38,8 @@ sudo ./scripts/install.sh
 
 Use the matching `linux_arm64` package on ARM64 hosts.
 
+After installation, run XuiFactor with the short `factor` command, for example `factor doctor`. The full `xui-factor` name works too. Numeric calls such as `factor 42` still reach the system `factor` command from coreutils.
+
 On systemd hosts, install enables and starts `xui-factor.service` by default. Use `--no-start` or `--no-enable` only when another init workflow will run the daemon.
 
 Install from a local checkout:
@@ -60,32 +62,32 @@ Point XuiFactor at a PostgreSQL panel with `database_backend` and `database_dsn`
 ## Common Commands
 
 ```sh
-xui-factor --help
-xui-factor doctor
-xui-factor backup
-xui-factor enable --email User --inbound-id 1 --factor 1.2
-xui-factor enable-all --factor 1.2
-xui-factor enable-all --factor 1.2 --limited-only
-xui-factor enable-all --factor 1.2 --once
-xui-factor exclude --email User --inbound-id 1
-xui-factor excludes
-xui-factor unexclude --email User --inbound-id 1
-xui-factor override --email User --inbound-id 1 --factor 1.2
-xui-factor overrides
-xui-factor remove-override --email User --inbound-id 1
-xui-factor explain --email User --inbound-id 1
-xui-factor status --effective
-xui-factor status --clients --inbound-id 1
-xui-factor report
-xui-factor audit --event override_enabled --limit 20
-xui-factor audit --since 24h
-xui-factor disable --email User --inbound-id 1
-xui-factor disable-all
-xui-factor reconcile --dry-run
-xui-factor cleanup --dry-run
-xui-factor status
-xui-factor audit --email User --inbound-id 1
-xui-factor tick
+factor --help
+factor doctor
+factor backup
+factor enable --email User --inbound-id 1 --factor 1.2
+factor enable-all --factor 1.2
+factor enable-all --factor 1.2 --limited-only
+factor enable-all --factor 1.2 --once
+factor exclude --email User --inbound-id 1
+factor excludes
+factor unexclude --email User --inbound-id 1
+factor override --email User --inbound-id 1 --factor 1.2
+factor overrides
+factor remove-override --email User --inbound-id 1
+factor explain --email User --inbound-id 1
+factor status --effective
+factor status --clients --inbound-id 1
+factor report
+factor audit --event override_enabled --limit 20
+factor audit --since 24h
+factor disable --email User --inbound-id 1
+factor disable-all
+factor reconcile --dry-run
+factor cleanup --dry-run
+factor status
+factor audit --email User --inbound-id 1
+factor tick
 sudo systemctl enable --now xui-factor.service
 sudo systemctl status xui-factor.service --no-pager
 ```
@@ -95,37 +97,37 @@ sudo systemctl status xui-factor.service --no-pager
 Apply a factor to one client:
 
 ```sh
-xui-factor enable --email user@example.com --inbound-id 1 --factor 1.2
-xui-factor status
+factor enable --email user@example.com --inbound-id 1 --factor 1.2
+factor status
 ```
 
 Apply a factor to enabled clients. By default, `enable-all` creates a persistent scope, so future matching clients are enrolled automatically from their current counters:
 
 ```sh
-xui-factor enable-all --factor 1.2
+factor enable-all --factor 1.2
 ```
 
 When possible, persistent `enable-all` also consolidates compatible active single-user rules into the scope while preserving their baselines.
 
-Use `xui-factor reconcile` to repair rule and policy metadata after panel upgrades or client changes. Normal status shows only effective active or paused rules; rules retired by reconcile stay visible through `status --all` until cleanup prunes them after retention.
+Use `factor reconcile` to repair rule and policy metadata after panel upgrades or client changes. Normal status shows only effective active or paused rules; rules retired by reconcile stay visible through `status --all` until cleanup prunes them after retention.
 
 Apply a factor only to limited clients:
 
 ```sh
-xui-factor enable-all --factor 1.2 --limited-only
+factor enable-all --factor 1.2 --limited-only
 ```
 
 Use snapshot mode when only current clients should be targeted:
 
 ```sh
-xui-factor enable-all --factor 1.2 --once
+factor enable-all --factor 1.2 --once
 ```
 
 Stop applying factors:
 
 ```sh
-xui-factor disable --email user@example.com --inbound-id 1
-xui-factor disable-all
+factor disable --email user@example.com --inbound-id 1
+factor disable-all
 ```
 
 ## Factor Behavior
@@ -138,29 +140,29 @@ Disabling a rule does not revert previously factored traffic. Traffic recorded a
 
 XuiFactor evaluates one effective decision per client before applying traffic deltas. Excludes win first, then user overrides, then single-user rules, inbound scopes, and global scopes. Overlapping metadata does not double-apply factors.
 
-Use `xui-factor exclude --email User --inbound-id 1` to keep one client out of matching rules and scopes. Previously factored traffic remains unchanged. `xui-factor unexclude --email User --inbound-id 1` resumes normal policy matching from the current counters, without retroactively factoring traffic from the excluded period.
+Use `factor exclude --email User --inbound-id 1` to keep one client out of matching rules and scopes. Previously factored traffic remains unchanged. `factor unexclude --email User --inbound-id 1` resumes normal policy matching from the current counters, without retroactively factoring traffic from the excluded period.
 
-Use `xui-factor override --email User --inbound-id 1 --factor 1.2` to give one exact client a specific future factor while broader scopes remain active. Overrides do not stack with scope factors. `xui-factor remove-override --email User --inbound-id 1` returns the client to matching rules and scopes from the current counters.
+Use `factor override --email User --inbound-id 1 --factor 1.2` to give one exact client a specific future factor while broader scopes remain active. Overrides do not stack with scope factors. `factor remove-override --email User --inbound-id 1` returns the client to matching rules and scopes from the current counters.
 
-Use `xui-factor explain --email User --inbound-id 1` to inspect the final effective decision for one client. Use `xui-factor status --effective` for grouped policy totals and `xui-factor status --clients --inbound-id 1` for client-level effective factors.
+Use `factor explain --email User --inbound-id 1` to inspect the final effective decision for one client. Use `factor status --effective` for grouped policy totals and `factor status --clients --inbound-id 1` for client-level effective factors.
 
-Use `xui-factor report` for a concise policy, effective client, service, and traffic impact summary. Use audit filters such as `xui-factor audit --event override_enabled --limit 20` or `xui-factor audit --since 24h` to inspect recent lifecycle events without noisy output.
+Use `factor report` for a concise policy, effective client, service, and traffic impact summary. Use audit filters such as `factor audit --event override_enabled --limit 20` or `factor audit --since 24h` to inspect recent lifecycle events without noisy output.
 
 ## Metadata Cleanup
 
 XuiFactor keeps its own metadata bounded with automatic cleanup enabled by default. Missing client tracking is pruned after 30 seconds, disabled rules after 7 days, and audit events after 30 days.
 
-Use `xui-factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata, including orphaned rules after retention, and never modifies 3x-ui counters. `VACUUM` runs only when explicitly requested with `xui-factor cleanup --vacuum`.
+Use `factor cleanup --dry-run` before manual cleanup on production servers. Cleanup only prunes XuiFactor metadata, including orphaned rules after retention, and never modifies 3x-ui counters. `VACUUM` runs only when explicitly requested with `factor cleanup --vacuum`.
 
 ## Safety Notes
 
 Run a backup before broad changes:
 
 ```sh
-xui-factor backup
+factor backup
 ```
 
-Test single-user rules before bulk rules on production servers. With master and node panels, run `xui-factor doctor` on the master and confirm `role: master`.
+Test single-user rules before bulk rules on production servers. With master and node panels, run `factor doctor` on the master and confirm `role: master`.
 
 ## Uninstall
 

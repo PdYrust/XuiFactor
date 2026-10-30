@@ -536,7 +536,7 @@ func TestCLIEnableErrorIncludesContextAndHint(t *testing.T) {
 		"email: missing@example.com",
 		"inbound: 1",
 		"Hint",
-		"run: xui-factor status",
+		"run: factor status",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("enable error output missing %q: %q", want, output)

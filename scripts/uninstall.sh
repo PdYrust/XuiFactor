@@ -32,6 +32,7 @@ main() {
 	require_linux
 	disable_and_stop_service
 	remove_systemd_service
+	remove_command_link
 	remove_installed_binary
 	remove_shared_files
 	if [ "$PURGE" -eq 1 ]; then

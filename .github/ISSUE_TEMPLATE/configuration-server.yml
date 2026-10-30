@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: XuiFactor version
-      placeholder: xui-factor version
+      placeholder: factor version
     validations:
       required: true
   - type: textarea
@@ -50,8 +50,8 @@ body:
       label: Diagnostics
       description: Include sanitized doctor, status, and service output.
       placeholder: |
-        xui-factor doctor
-        xui-factor status
+        factor doctor
+        factor status
         systemctl status xui-factor.service --no-pager
       render: text
     validations:

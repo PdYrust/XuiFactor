@@ -2,6 +2,7 @@
 set -eu
 
 BINARY_NAME=${BINARY_NAME:-xui-factor}
+COMMAND_NAME=${COMMAND_NAME:-factor}
 DISPLAY_NAME=${DISPLAY_NAME:-XuiFactor}
 INSTALL_PREFIX=${INSTALL_PREFIX:-/usr/local}
 BIN_DIR=${BIN_DIR:-$INSTALL_PREFIX/bin}
@@ -111,6 +112,29 @@ install_binary_atomic() {
 	rm -f "$tmp"
 	install -m 0755 "$src" "$tmp"
 	mv -f "$tmp" "$dst"
+}
+
+command_link_is_ours() {
+	[ -L "$1" ] && [ "$(readlink "$1")" = "$BINARY_NAME" ]
+}
+
+install_command_link() {
+	link=$(stage_path "$BIN_DIR/$COMMAND_NAME")
+	if [ -e "$link" ] || [ -L "$link" ]; then
+		if ! command_link_is_ours "$link"; then
+			warn "$BIN_DIR/$COMMAND_NAME already exists; use $BINARY_NAME instead"
+			return 0
+		fi
+	fi
+	ln -sfn "$BINARY_NAME" "$link"
+}
+
+remove_command_link() {
+	link=$(stage_path "$BIN_DIR/$COMMAND_NAME")
+	if command_link_is_ours "$link"; then
+		rm -f "$link"
+		info "removed $BIN_DIR/$COMMAND_NAME"
+	fi
 }
 
 install_shared_files() {
@@ -374,6 +398,7 @@ show_installed_version() {
 
 print_next_steps() {
 	info "$DISPLAY_NAME installed"
+	info "command: $COMMAND_NAME (for example: $COMMAND_NAME doctor)"
 	info "config: $CONFIG_FILE"
 	if staged_mode; then
 		info "staged root: $DESTDIR"

@@ -26,7 +26,7 @@ type Runner struct {
 	lastTickError       string
 }
 
-var ErrManagedPanel = errors.New("this panel is managed by a 3x-ui master: run xui-factor on the master, or set factor_on_managed_node when the master does not factor these clients")
+var ErrManagedPanel = errors.New("this panel is managed by a 3x-ui master: run XuiFactor on the master, or set factor_on_managed_node when the master does not factor these clients")
 
 type TickResult struct {
 	ActiveClients int
