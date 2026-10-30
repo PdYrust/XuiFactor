@@ -88,7 +88,7 @@ func (r *Runner) Tick(ctx context.Context) (TickResult, error) {
 	var result TickResult
 
 	err := r.store.WithImmediateTx(ctx, func(tx *store.Tx) error {
-		// Factoring on a node and again on its master would multiply node
+		// Factoring on a node and again on its master would factor node
 		// traffic twice, because the master adds the node's counter deltas.
 		if !r.cfg.FactorOnManagedNode {
 			role, err := tx.PanelRole(ctx, clock)

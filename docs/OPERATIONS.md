@@ -117,7 +117,7 @@ Apply a factor to all enabled clients:
 xui-factor enable-all --factor 1.2
 ```
 
-`enable-all` is persistent by default. Current matching clients are enrolled immediately, and future matching clients are enrolled by the daemon tick from their current counters. Traffic that happened before enrollment is not multiplied.
+`enable-all` is persistent by default. Current matching clients are enrolled immediately, and future matching clients are enrolled by the daemon tick from their current counters. Traffic that happened before enrollment is not factored.
 
 Compatible active single-user rules are consolidated into the persistent scope. Existing baselines and remainders are preserved, and the adopted single-user rules become merged metadata that cleanup can prune later.
 

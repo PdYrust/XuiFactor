@@ -141,7 +141,7 @@ func TestPausedRulesDoNotMutateCounters(t *testing.T) {
 	assertCounters(t, h.dbPath, 1, 110, 220)
 }
 
-func TestDisableKeepsPreviouslyMultipliedResults(t *testing.T) {
+func TestDisableKeepsPreviouslyFactoredResults(t *testing.T) {
 	ctx := context.Background()
 	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()
@@ -165,7 +165,7 @@ func TestDisableKeepsPreviouslyMultipliedResults(t *testing.T) {
 	assertCounters(t, h.dbPath, 1, 160, 320)
 }
 
-func TestCounterDecreaseRebaselinesWithoutMultiplierWrite(t *testing.T) {
+func TestCounterDecreaseRebaselinesWithoutFactorWrite(t *testing.T) {
 	ctx := context.Background()
 	h := newTickHarness(t, []testTraffic{{id: 1, inboundID: 1, email: "user@example.com", up: 100, down: 200}})
 	defer h.store.Close()

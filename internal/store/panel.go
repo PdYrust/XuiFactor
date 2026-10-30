@@ -11,7 +11,6 @@ import (
 // rows older than this window as coming from a master that stopped managing it.
 const managedPanelWindow = 24 * time.Hour
 
-// PanelRole describes where this panel sits in a 3x-ui master/node setup.
 type PanelRole struct {
 	Nodes   int
 	Managed bool
