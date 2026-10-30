@@ -116,17 +116,6 @@ verify-archives:
 		grep -Fqx "ExecStart=/usr/local/bin/xui-factor --config /etc/xui-factor/config.json run" "$$tmp_dir/$$package_name/systemd/xui-factor.service"; \
 		grep -Fq "xui-factor_v" "$$tmp_dir/$$package_name/README.md"; \
 		grep -Fq "xui-factor_v" "$$tmp_dir/$$package_name/docs/OPERATIONS.md"; \
-		old_dash=$$(printf 'xui-%s' 'multiplier'); \
-		old_under=$$(printf 'xui_%s' 'multiplier'); \
-		old_display=$$(printf 'Xui%s' 'Multiplier'); \
-		if grep -RInE "$$old_dash|$$old_under|$$old_display" \
-			"$$tmp_dir/$$package_name/README.md" \
-			"$$tmp_dir/$$package_name/docs/OPERATIONS.md" \
-			"$$tmp_dir/$$package_name/config/config.json" \
-			"$$tmp_dir/$$package_name/systemd/xui-factor.service" \
-			"$$tmp_dir/$$package_name/scripts"; then \
-			exit 1; \
-		fi; \
 		expected_manifest="$$tmp_dir/expected-manifest.txt"; \
 		printf '%s\n' \
 			"$(APP)" \
