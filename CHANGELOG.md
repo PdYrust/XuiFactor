@@ -2,10 +2,11 @@
 
 All notable changes to XuiFactor are documented in this file.
 
-## v0.5.1-beta - Unreleased
+## v0.6.0 - Stable
 
 ### Added
 
+- First stable release for 3x-ui 3.x with SQLite and PostgreSQL panels; v0.6.0 release notes cover the upgrade from v0.4.0 and from v0.5.0-beta.
 - 3x-ui master and node support. On a master, XuiFactor factors local traffic and the node deltas the master merges, once. On a panel managed by a master (a master pushed client usage within 24 hours), ticks are refused so node traffic is not factored twice; `factor_on_managed_node` allows them when the master does not factor the same clients.
 - `doctor` reports the panel role (`standalone`, `master` with its enabled node count, or `node`) and warns on a managed node.
 - `tick` reports `deferred` clients.
@@ -29,6 +30,7 @@ All notable changes to XuiFactor are documented in this file.
 - `traffic_applied` audit events record `extra_up` and `extra_down` only; report traffic impact sums both fields.
 - The installer creates `/etc/xui-factor/config.json` with mode `0600`, because `database_dsn` can hold a password. Existing config files keep their mode.
 - `backup` prints a `pg_restore` hint on PostgreSQL, and CLI help describes `backup` and `reconcile` for both backends.
+- Release metadata, package examples, the README status badge, and release workflow defaults point to v0.6.0 stable package names.
 - `make verify-installers` checks that the installed unit matches the packaged unit and that the new config file is private.
 - Regression tests cover concurrent panel writes on PostgreSQL, read-only PostgreSQL sessions, auto backend detection, hostless DSN redaction, one-time skip auditing, `unexclude` baselines, panel role detection, and the managed node guard.
 

@@ -17,8 +17,8 @@ Repository: https://github.com/PdYrust/XuiFactor
 Download the release archive that matches the server architecture, then install from the extracted package:
 
 ```sh
-tar -xzf xui-factor_v0.5.1-beta_linux_amd64.tar.gz
-cd xui-factor_v0.5.1-beta_linux_amd64
+tar -xzf xui-factor_v0.6.0_linux_amd64.tar.gz
+cd xui-factor_v0.6.0_linux_amd64
 sudo ./scripts/install.sh
 ```
 

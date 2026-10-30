@@ -167,7 +167,7 @@ func TestDatabaseFlagSelectsSQLiteBackend(t *testing.T) {
 }
 
 func TestReleaseMetadata(t *testing.T) {
-	const release = "0.5.1-beta"
+	const release = "0.6.0"
 	version := strings.TrimSpace(readRepoFile(t, "VERSION"))
 	if version != release {
 		t.Fatalf("expected VERSION to be %s, got %q", release, version)
@@ -176,7 +176,7 @@ func TestReleaseMetadata(t *testing.T) {
 	arm64Package := "xui-factor_v" + release + "_linux_arm64.tar.gz"
 
 	readme := readRepoFile(t, "README.md")
-	for _, want := range []string{amd64Package, "license-AGPL--3.0-111111", "status-beta-111111"} {
+	for _, want := range []string{amd64Package, "license-AGPL--3.0-111111", "status-stable-111111"} {
 		if !strings.Contains(readme, want) {
 			t.Fatalf("expected README to contain %q", want)
 		}
@@ -210,7 +210,7 @@ func TestReleaseMetadata(t *testing.T) {
 	}
 
 	changelog := readRepoFile(t, "CHANGELOG.md")
-	if !strings.Contains(changelog, "## v"+release+" - Unreleased") {
+	if !strings.Contains(changelog, "## v"+release+" - Stable") {
 		t.Fatalf("changelog is missing the v%s entry", release)
 	}
 

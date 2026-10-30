@@ -12,7 +12,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-111111"></a>
   <img alt="Go 1.25+" src="https://img.shields.io/badge/go-1.25%2B-00ADD8">
-  <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-111111">
+  <img alt="Status: stable" src="https://img.shields.io/badge/status-stable-111111">
   <a href="https://t.me/PdYrust"><img alt="Telegram channel" src="https://img.shields.io/badge/Telegram-%40PdYrust-229ED9?logo=telegram&logoColor=white"></a>
 </p>
 
@@ -31,8 +31,8 @@ For server operation workflows, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 Install from a release package:
 
 ```sh
-tar -xzf xui-factor_v0.5.1-beta_linux_amd64.tar.gz
-cd xui-factor_v0.5.1-beta_linux_amd64
+tar -xzf xui-factor_v0.6.0_linux_amd64.tar.gz
+cd xui-factor_v0.6.0_linux_amd64
 sudo ./scripts/install.sh
 ```
 
